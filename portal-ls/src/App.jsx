@@ -132,6 +132,7 @@ export default function App() {
          }
       }
       
+      console.error("Detalhes do erro Auth:", authData);
     } catch (err) {
       console.error("Erro na requisição de login:", err);
     }
@@ -399,7 +400,7 @@ function AdminPortal() {
       case 'clients': return <AdminClients />;
       case 'projects': return <AdminProjects />;
       case 'integrations': return <AdminPlaceholder title="Integrações" desc="Configurações de APIs e integrações de terceiros." />;
-      case 'financial': return <AdminPlaceholder title="Financeiro Administrativo" desc="Gestão financeira global da LS." />;
+      case 'financial': return <AdminFinancial />;
       case 'register-admin': return <AdminRegisterAdmin />;
       case 'register-company': return <AdminRegisterCompany />;
       case 'register-user': return <AdminRegisterUser />;
@@ -1297,6 +1298,162 @@ function AdminPlaceholder({ title, desc }) {
   );
 }
 
+function AdminFinancial() {
+  const { companies, financials, setFinancials, generateId, fetchSupabase } = useContext(AppContext);
+  const [isAdding, setIsAdding] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [expandedCompanyId, setExpandedCompanyId] = useState(null);
+  
+  const [companyId, setCompanyId] = useState('');
+  const [description, setDescription] = useState('');
+  const [amount, setAmount] = useState('');
+  const [dueDate, setDueDate] = useState('');
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    const newFin = {
+      id: generateId('FIN'),
+      companyId,
+      description,
+      amount,
+      dueDate,
+      status: 'pending',
+      receiptUrl: null
+    };
+    await fetchSupabase('/rest/v1/financials', { method: 'POST', body: JSON.stringify(newFin) });
+    setFinancials([newFin, ...financials]);
+    setIsAdding(false);
+    setCompanyId(''); setDescription(''); setAmount(''); setDueDate('');
+    setLoading(false);
+  };
+
+  const getCompanyStatus = (compId) => {
+    const companyFins = financials.filter(f => f.companyId === compId);
+    if (companyFins.length === 0) return { label: 'Sem cobranças', color: 'bg-slate-100 text-slate-600' };
+    
+    const hasOverdue = companyFins.some(f => f.status === 'pending' && new Date(f.dueDate) < new Date(new Date().setHours(0,0,0,0)));
+    if (hasOverdue) return { label: 'Atrasado', color: 'bg-red-100 text-red-700' };
+    
+    const hasPending = companyFins.some(f => f.status === 'pending');
+    if (hasPending) return { label: 'Pendente', color: 'bg-orange-100 text-orange-700' };
+    
+    return { label: 'Em dia', color: 'bg-emerald-100 text-emerald-700' };
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Financeiro Administrativo</h1>
+          <p className="text-slate-500">Gestão de cobranças e status de pagamento das empresas.</p>
+        </div>
+        <button onClick={() => setIsAdding(!isAdding)} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 transition-colors shadow-sm">
+          <Plus size={18}/> Nova Cobrança
+        </button>
+      </div>
+
+      {isAdding && (
+        <div className="bg-white p-6 rounded-xl border border-blue-200 shadow-sm mb-6">
+          <h3 className="font-bold text-slate-800 mb-4">Criar Nova Cobrança (Card de Pagamento)</h3>
+          <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Empresa</label>
+              <select className="w-full p-2 border rounded bg-white focus:ring-2 focus:ring-blue-500 outline-none" value={companyId} onChange={e=>setCompanyId(e.target.value)} required disabled={loading}>
+                <option value="">Selecione...</option>
+                {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Descrição / Parcela</label>
+              <input type="text" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Ex: Parcela 1/3 - Desenvolvimento" value={description} onChange={e=>setDescription(e.target.value)} required disabled={loading}/>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Valor (R$)</label>
+              <input type="text" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Ex: 1500,00" value={amount} onChange={e=>setAmount(e.target.value)} required disabled={loading}/>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Vencimento</label>
+              <input type="date" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" value={dueDate} onChange={e=>setDueDate(e.target.value)} required disabled={loading}/>
+            </div>
+            <div className="md:col-span-4 flex justify-end gap-2 mt-2">
+              <button type="button" onClick={() => setIsAdding(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded transition-colors" disabled={loading}>Cancelar</button>
+              <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:opacity-70" disabled={loading}>
+                {loading ? 'Criando...' : 'Criar Card de Pagamento'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <table className="w-full text-left text-sm text-slate-600">
+          <thead className="bg-slate-50 text-slate-700 border-b border-slate-200">
+            <tr>
+              <th className="px-6 py-4 font-semibold">Empresa</th>
+              <th className="px-6 py-4 font-semibold">Status Geral</th>
+              <th className="px-6 py-4 font-semibold text-right">Ação</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {companies.map(comp => {
+              const status = getCompanyStatus(comp.id);
+              const compFins = financials.filter(f => f.companyId === comp.id).sort((a,b) => new Date(b.dueDate) - new Date(a.dueDate));
+              const isExpanded = expandedCompanyId === comp.id;
+              
+              return (
+                <React.Fragment key={comp.id}>
+                  <tr className="hover:bg-slate-50 cursor-pointer transition-colors" onClick={() => setExpandedCompanyId(isExpanded ? null : comp.id)}>
+                    <td className="px-6 py-4 font-medium text-slate-800 align-middle">{comp.name}</td>
+                    <td className="px-6 py-4 align-middle">
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${status.color}`}>{status.label}</span>
+                    </td>
+                    <td className="px-6 py-4 align-middle text-right">
+                       {isExpanded ? <ChevronUp size={20} className="text-slate-400 inline-block"/> : <ChevronDown size={20} className="text-slate-400 inline-block"/>}
+                    </td>
+                  </tr>
+                  
+                  {isExpanded && (
+                    <tr className="bg-slate-50/50">
+                      <td colSpan="3" className="px-6 py-6 border-t border-slate-100">
+                        <div className="max-w-3xl">
+                          <h4 className="font-bold text-slate-700 mb-4 border-b pb-2 border-slate-200">Cobranças Registradas ({compFins.length})</h4>
+                          {compFins.length === 0 ? <span className="text-slate-400 text-sm">Nenhuma cobrança registrada para este cliente.</span> : (
+                            <div className="space-y-3">
+                              {compFins.map(f => (
+                                <div key={f.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-white border border-slate-200 p-4 rounded-xl shadow-sm">
+                                  <div>
+                                    <p className="font-bold text-slate-800">{f.description}</p>
+                                    <p className="text-slate-500 mt-1 text-xs">Valor: <span className="font-bold text-blue-600">R$ {f.amount}</span> • Vencimento: {new Date(f.dueDate).toLocaleDateString()}</p>
+                                  </div>
+                                  <div className="text-right mt-3 sm:mt-0">
+                                    {f.status === 'paid' ? (
+                                      <div className="flex flex-col items-end">
+                                        <span className="text-emerald-600 font-bold flex items-center gap-1 bg-emerald-50 px-3 py-1 rounded-full text-xs"><CheckCircle2 size={14}/> Pago</span>
+                                        {f.receiptUrl && <a href="#" onClick={(e)=>e.preventDefault()} className="text-blue-600 hover:text-blue-700 font-medium text-[11px] mt-1.5 flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded transition-colors"><FileText size={12}/> Ver Comprovante</a>}
+                                      </div>
+                                    ) : (
+                                      <span className="text-orange-600 font-bold flex items-center gap-1 bg-orange-50 px-3 py-1 rounded-full text-xs"><Circle size={14}/> Aguardando</span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function ClientPortal() {
   const { currentUser, handleLogout } = useContext(AppContext);
   const [currentView, setCurrentView] = useState('home');
@@ -1528,30 +1685,25 @@ function ClientProjects() {
 
                <div className="max-w-3xl mx-auto space-y-4">
                  
-                 {!selectedProject?.clientApproved ? (
-                   <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm">
-                     <div>
-                       <h4 className="font-bold text-orange-800 flex items-center gap-2"><AlertCircle size={18}/> Aprovação do Projeto Pendente</h4>
-                       <p className="text-sm text-orange-700 mt-1">Confirme o início e o escopo deste projeto. <strong>Esta ação é única e irreversível.</strong></p>
-                     </div>
-                     <button onClick={handleApproveProject} className="bg-orange-600 hover:bg-orange-700 text-white px-5 py-2.5 rounded-lg font-medium transition-colors shadow-sm whitespace-nowrap">
-                       Aprovar Projeto
-                     </button>
-                   </div>
-                 ) : (
-                   <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl flex items-center gap-3 shadow-sm">
-                     <CheckCircle2 className="text-emerald-600 flex-shrink-0" size={24} />
-                     <div>
-                       <h4 className="font-bold text-emerald-800">Projeto Aprovado</h4>
-                       <p className="text-sm text-emerald-700">Você aprovou oficialmente o início deste projeto.</p>
-                     </div>
-                   </div>
-                 )}
-
                  {selectedProject?.observation && (
                    <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
                      <h4 className="font-semibold text-slate-700 mb-2 flex items-center gap-2"><CheckSquare size={16}/> Última Atualização da Equipe</h4>
                      <p className="text-sm text-slate-600 whitespace-pre-wrap">{selectedProject.observation}</p>
+                   </div>
+                 )}
+
+                 {projHistory.length > 0 && (
+                   <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
+                     <h4 className="font-semibold text-slate-700 mb-4 flex items-center gap-2"><Clock size={16}/> Atualizações do Projeto</h4>
+                     <div className="relative border-l-2 border-slate-200 ml-4 space-y-4">
+                       {projHistory.map(h => (
+                         <div key={h.id} className="pl-6 relative">
+                           <div className="absolute w-3 h-3 bg-white border-2 border-slate-300 rounded-full -left-[7px] top-1"></div>
+                           <p className="text-sm font-medium text-slate-800">{h.description}</p>
+                           <p className="text-xs text-slate-500 mt-1">{new Date(h.date).toLocaleString()}</p>
+                         </div>
+                       ))}
+                     </div>
                    </div>
                  )}
 
@@ -1609,7 +1761,28 @@ function ClientProjects() {
           {activeTab === 'aprovacoes' && (
              <div className="space-y-4">
               <h3 className="font-semibold text-slate-700 mb-4">Aprovações Pendentes / Concluídas</h3>
-              {projApprovals.length === 0 ? <EmptyState message="Nenhuma aprovação solicitada para este projeto ainda." /> : 
+              
+              {!selectedProject?.clientApproved ? (
+                <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm">
+                  <div>
+                    <h4 className="font-bold text-orange-800 flex items-center gap-2"><AlertCircle size={18}/> Aprovação do Projeto Pendente</h4>
+                    <p className="text-sm text-orange-700 mt-1">Confirme o início e o escopo deste projeto. <strong>Esta ação é única e irreversível.</strong></p>
+                  </div>
+                  <button onClick={handleApproveProject} className="bg-orange-600 hover:bg-orange-700 text-white px-5 py-2.5 rounded-lg font-medium transition-colors shadow-sm whitespace-nowrap">
+                    Aprovar Projeto
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl flex items-center gap-3 shadow-sm">
+                  <CheckCircle2 className="text-emerald-600 flex-shrink-0" size={24} />
+                  <div>
+                    <h4 className="font-bold text-emerald-800">Projeto Aprovado</h4>
+                    <p className="text-sm text-emerald-700">Aprovado pelo cliente oficialmente na plataforma.</p>
+                  </div>
+                </div>
+              )}
+
+              {projApprovals.length === 0 ? <EmptyState message="Nenhuma aprovação adicional solicitada para este projeto ainda." /> : 
                 <ul className="space-y-3">
                   {projApprovals.map(a => (
                     <li key={a.id} className={`p-4 border rounded-lg flex items-start gap-4 transition-colors ${a.approved ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'}`}>
@@ -1733,14 +1906,24 @@ function ClientSupport() {
 }
 
 function ClientFinancial() {
-  const { currentUser, financials } = useContext(AppContext);
-  const myFinancials = financials.filter(f => f.companyId === currentUser.companyId);
+  const { currentUser, financials, setFinancials, fetchSupabase } = useContext(AppContext);
+  const myFinancials = financials.filter(f => f.companyId === currentUser.companyId).sort((a,b) => new Date(b.dueDate) - new Date(a.dueDate));
+  const [loading, setLoading] = useState(false);
+
+  const handleUploadReceipt = async (finId, file) => {
+    if(!file) return;
+    setLoading(true);
+    const updates = { receiptUrl: file.name, status: 'paid' };
+    await fetchSupabase(`/rest/v1/financials?id=eq.${finId}`, { method: 'PATCH', body: JSON.stringify(updates) });
+    setFinancials(financials.map(f => f.id === finId ? { ...f, ...updates } : f));
+    setLoading(false);
+  };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-800">Financeiro</h1>
-        <p className="text-slate-600">Portal de pagamentos e histórico de faturas.</p>
+        <p className="text-slate-600">Portal de pagamentos, envio de comprovantes e histórico de faturas.</p>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 text-center">
@@ -1754,12 +1937,42 @@ function ClientFinancial() {
           </div>
         ) : (
           <div className="text-left">
-            <h3 className="font-semibold mb-4 border-b pb-2">Histórico de Faturas</h3>
-            <ul className="space-y-2">
+            <h3 className="font-semibold mb-4 border-b pb-2">Suas Parcelas e Cobranças</h3>
+            <ul className="space-y-4">
               {myFinancials.map(f => (
-                 <li key={f.id} className="flex justify-between p-3 border rounded">
-                   <span>{f.description}</span>
-                   <span className="font-bold">R$ {f.amount}</span>
+                 <li key={f.id} className={`p-5 border rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-all ${f.status === 'paid' ? 'bg-slate-50 border-slate-200' : 'bg-white border-blue-200 shadow-md'}`}>
+                   <div>
+                     <p className="font-bold text-slate-800 text-lg">{f.description}</p>
+                     <p className="text-sm text-slate-500 mt-1">Vencimento: {new Date(f.dueDate).toLocaleDateString()}</p>
+                     <p className="font-black text-blue-600 mt-1">R$ {f.amount}</p>
+                   </div>
+                   
+                   <div className="text-right w-full sm:w-auto">
+                     {f.status === 'paid' ? (
+                       <div className="flex flex-col items-end">
+                         <span className="bg-emerald-100 text-emerald-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2">
+                           <CheckCircle2 size={18}/> Pagamento Confirmado
+                         </span>
+                         {f.receiptUrl && <span className="text-xs font-medium text-slate-500 mt-2 flex items-center gap-1"><FileText size={12}/> Comprovante: {f.receiptUrl}</span>}
+                       </div>
+                     ) : (
+                       <div className="flex flex-col items-end gap-3 w-full">
+                         <span className="bg-orange-100 text-orange-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2">
+                           <Circle size={18}/> Aguardando Pagamento
+                         </span>
+                         <div className="mt-2 text-left w-full bg-blue-50/50 p-3 rounded-lg border border-blue-100">
+                           <label className="text-xs text-slate-600 font-semibold block mb-2">Fazer upload do comprovante:</label>
+                           <input 
+                             type="file" 
+                             accept="image/*,.pdf" 
+                             className="block w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer"
+                             onChange={e => handleUploadReceipt(f.id, e.target.files[0])}
+                             disabled={loading}
+                           />
+                         </div>
+                       </div>
+                     )}
+                   </div>
                  </li>
               ))}
             </ul>
