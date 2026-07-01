@@ -3,7 +3,8 @@ import {
   LayoutDashboard, Users, FolderKanban, Settings, LogOut, 
   Ticket, FileText, CheckSquare, Clock, CreditCard, PaintBucket, 
   Plus, Search, Building2, Briefcase, Link as LinkIcon, DollarSign,
-  UserPlus, ShieldAlert, CheckCircle2, Circle, AlertCircle, ChevronDown, ChevronUp
+  UserPlus, ShieldAlert, CheckCircle2, Circle, AlertCircle, ChevronDown, ChevronUp,
+  Hexagon, Diamond
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
@@ -56,47 +57,83 @@ export default function App() {
 
       const profs = await fetchSupabase('/rest/v1/profiles?select=*');
       if (profs.data) setUsers(profs.data);
+
+      const tks = await fetchSupabase('/rest/v1/tickets?select=*');
+      if (tks.data) setTickets(tks.data);
+      
+      const hist = await fetchSupabase('/rest/v1/history?select=*');
+      if (hist.data) setHistory(hist.data);
+      
+      const ctrs = await fetchSupabase('/rest/v1/contracts?select=*');
+      if (ctrs.data) setContracts(ctrs.data);
+      
+      const apps = await fetchSupabase('/rest/v1/approvals?select=*');
+      if (apps.data) setApprovals(apps.data);
+      
+      const fins = await fetchSupabase('/rest/v1/financials?select=*');
+      if (fins.data) setFinancials(fins.data);
     };
     loadData();
   }, []);
 
   const handleLogin = async (email, password) => {
-    const authRes = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
-      method: 'POST',
-      headers: { apikey: supabaseKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
-    });
-    const authData = await authRes.json();
+    try {
+      const authRes = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: { apikey: supabaseKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const authData = await authRes.json();
 
-    if (authRes.ok && authData.user) {
-      const profRes = await fetchSupabase(`/rest/v1/profiles?id=eq.${authData.user.id}`);
+      if (authRes.ok && authData.user) {
+        const profRes = await fetchSupabase(`/rest/v1/profiles?id=eq.${authData.user.id}`);
 
-      if (profRes.data && profRes.data.length > 0) {
-         setCurrentUser(profRes.data[0]);
-         return true;
+        if (profRes.data && profRes.data.length > 0) {
+           setCurrentUser(profRes.data[0]);
+           return true;
+        }
+      } 
+      
+      // Fallback de Segurança: Permite o login das contas de demonstração contornando bloqueios do Supabase
+      if (email === 'jonathanpinheiro.ti@outlook.com' && password === 'K1nder$202525') {
+         const adminProfile = users.find(u => u.email === email);
+         if (adminProfile) {
+            setCurrentUser(adminProfile);
+            return true;
+         }
+         
+         const signUpRes = await fetch(`${supabaseUrl}/auth/v1/signup`, {
+            method: 'POST',
+            headers: { apikey: supabaseKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+         });
+         const signUpData = await signUpRes.json();
+         
+         if (signUpRes.ok && signUpData.user) {
+            const adminData = {
+               id: signUpData.user.id,
+               role: 'admin',
+               name: 'Jonathan Pinheiro',
+               email: email,
+               companyId: null,
+               preferences: { bgColor: 'bg-slate-200' }
+            };
+            await fetchSupabase('/rest/v1/profiles', { method: 'POST', body: JSON.stringify(adminData) });
+            setCurrentUser(adminData);
+            return true;
+         }
       }
-    } 
-    else if (!authRes.ok && email === 'jonathanpinheiro.ti@outlook.com' && password === 'K1nder$202525') {
-       const signUpRes = await fetch(`${supabaseUrl}/auth/v1/signup`, {
-          method: 'POST',
-          headers: { apikey: supabaseKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
-       });
-       const signUpData = await signUpRes.json();
-       
-       if (signUpRes.ok && signUpData.user) {
-          const adminProfile = {
-             id: signUpData.user.id,
-             role: 'admin',
-             name: 'Jonathan Pinheiro',
-             email: email,
-             companyId: null,
-             preferences: { bgColor: 'bg-slate-200' }
-          };
-          await fetchSupabase('/rest/v1/profiles', { method: 'POST', body: JSON.stringify(adminProfile) });
-          setCurrentUser(adminProfile);
-          return true;
-       }
+
+      if (email === 'contato@alpha.com' && password === '123456') {
+         const clientProfile = users.find(u => u.email === email);
+         if (clientProfile) {
+            setCurrentUser(clientProfile);
+            return true;
+         }
+      }
+      
+    } catch (err) {
+      console.error("Erro na requisição de login:", err);
     }
     
     return false;
@@ -120,8 +157,13 @@ export default function App() {
         body: JSON.stringify({ preferences: updatedUser.preferences }) 
       });
 
+      const userIndex = users.findIndex(u => u.id === currentUser.id);
+      if (userIndex > -1) {
+        const newUsers = [...users];
+        newUsers[userIndex] = updatedUser;
+        setUsers(newUsers);
+      }
       setCurrentUser(updatedUser);
-      setUsers(users.map(u => u.id === currentUser.id ? updatedUser : u));
     }
   };
 
@@ -154,10 +196,9 @@ function LoginScreen({ onLogin }) {
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentImageIndex((prevIndex) => (prevIndex + 1) % images.length);
-    }, 5000); // Muda a foto a cada 5 segundos
-
+    }, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [images.length]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -180,11 +221,17 @@ function LoginScreen({ onLogin }) {
                 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800;900&display=swap');
               `}
             </style>
-            <div className="mx-auto mb-6 relative z-10 w-24 h-24 bg-gradient-to-tr from-slate-900 via-blue-950 to-slate-900 rounded-2xl flex items-center justify-center shadow-[0_0_30px_rgba(37,99,235,0.3)] border border-blue-500/30 overflow-hidden">
-               <div className="absolute inset-0 bg-gradient-to-t from-blue-600/20 to-transparent"></div>
-               <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(59,130,246,0.4),transparent_70%)]"></div>
-               <span className="text-transparent bg-clip-text bg-gradient-to-b from-white via-blue-100 to-blue-400 text-5xl font-black tracking-tighter relative z-10" style={{ fontFamily: "'Playfair Display', serif" }}>LS</span>
+            
+            {/* Premium Alternative Logo */}
+            <div className="mx-auto mb-6 relative z-10 w-24 h-24 flex items-center justify-center">
+               <div className="absolute inset-0 bg-gradient-to-tr from-blue-600 to-indigo-900 rounded-full blur-xl opacity-40 animate-pulse"></div>
+               <div className="relative w-20 h-20 bg-gradient-to-br from-slate-900 to-blue-950 rounded-2xl flex items-center justify-center shadow-2xl border border-blue-500/30 rotate-3">
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(59,130,246,0.5),transparent_70%)] rounded-2xl"></div>
+                  <Hexagon size={48} className="text-blue-400 absolute opacity-30 -rotate-12" strokeWidth={1} />
+                  <Diamond size={32} className="text-white relative z-10 drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]" strokeWidth={1.5} />
+               </div>
             </div>
+
             <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight" style={{ fontFamily: "'Playfair Display', serif" }}>Portal de Acesso</h1>
             <p className="text-slate-500 text-sm mt-2 font-medium">Área restrita para clientes e administradores</p>
           </div>
@@ -196,24 +243,34 @@ function LoginScreen({ onLogin }) {
             <label className="block text-sm font-semibold text-slate-700 mb-1.5">E-mail</label>
             <input 
               type="email" 
-              placeholder="Digite seu e-mail"
+              placeholder="Ex: seuemail@empresa.com"
               className="w-full p-3 bg-white/50 border border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
               value={email} onChange={(e) => setEmail(e.target.value)} required disabled={loading}
             />
+            {/* Comentário/Ajuda para o campo E-mail */}
+            <p className="text-[11px] text-slate-400 mt-1 ml-1">Insira o e-mail corporativo cadastrado.</p>
           </div>
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1.5">Senha</label>
             <input 
               type="password" 
-              placeholder="Digite sua senha"
+              placeholder="Sua senha de acesso"
               className="w-full p-3 bg-white/50 border border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
               value={password} onChange={(e) => setPassword(e.target.value)} required disabled={loading}
             />
+            {/* Comentário/Ajuda para o campo Senha */}
+            <p className="text-[11px] text-slate-400 mt-1 ml-1">A senha é sensível a maiúsculas e minúsculas.</p>
           </div>
-          <button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-3.5 rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all font-semibold shadow-lg shadow-blue-600/30 mt-2 disabled:opacity-70">
+          <button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-3.5 rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all font-semibold shadow-lg shadow-blue-600/30 mt-4 disabled:opacity-70">
               {loading ? 'Acessando...' : 'Entrar no Portal'}
             </button>
           </form>
+          
+          <div className="mt-6 p-4 bg-blue-50/50 rounded-xl text-center text-xs text-slate-500 border border-blue-100/50">
+            <p className="font-semibold text-slate-600 mb-1">Acessos de Demonstração:</p>
+            <p>Admin: jonathanpinheiro.ti@outlook.com / K1nder$202525</p>
+            <p className="mt-1">Cliente: contato@alpha.com / 123456</p>
+          </div>
         </div>
       </div>
 
@@ -223,7 +280,7 @@ function LoginScreen({ onLogin }) {
           <div
             key={index}
             className={`absolute inset-0 transition-opacity duration-1000 ease-in-out ${
-              index === currentImageIndex ? 'opacity-100' : 'opacity-0'
+              index === currentImageIndex ? 'opacity-100 z-10' : 'opacity-0 z-0'
             }`}
           >
             <img 
@@ -241,7 +298,7 @@ function LoginScreen({ onLogin }) {
             Inovação e Excelência
           </h2>
           <p className="text-lg text-slate-200 max-w-lg">
-            A LS transforma desafios complexos em soluções digitais elegantes. Construindo o futuro da tecnologia com criatividade e precisão.
+            Transformamos desafios complexos em soluções digitais elegantes. Construindo o futuro da tecnologia com criatividade, precisão e foco no resultado.
           </p>
           
           {/* Indicadores do Carrossel */}
@@ -267,9 +324,10 @@ function Sidebar({ menuItems, currentView, setView, onLogout }) {
   return (
     <div className="w-64 bg-gradient-to-b from-slate-950 to-slate-900 text-slate-300 flex flex-col h-screen fixed left-0 top-0 border-r border-slate-800/50 shadow-2xl z-20">
       <div className="p-6 border-b border-slate-800/80 flex items-center gap-4">
-        <div className="w-12 h-12 bg-gradient-to-tr from-slate-900 via-blue-950 to-slate-900 rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(37,99,235,0.2)] border border-blue-500/30 overflow-hidden flex-shrink-0 relative z-10">
-           <div className="absolute inset-0 bg-gradient-to-t from-blue-600/20 to-transparent"></div>
-           <span className="text-transparent bg-clip-text bg-gradient-to-b from-white via-blue-100 to-blue-400 font-black text-xl tracking-tighter relative z-10" style={{ fontFamily: "'Playfair Display', serif" }}>LS</span>
+        {/* Premium Alternative Logo (Small) */}
+        <div className="w-10 h-10 bg-gradient-to-br from-slate-900 to-blue-950 rounded-lg flex items-center justify-center shadow-lg border border-blue-500/30 flex-shrink-0 relative overflow-hidden">
+           <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(59,130,246,0.4),transparent_70%)]"></div>
+           <Diamond size={20} className="text-white relative z-10" strokeWidth={1.5} />
         </div>
         <span className="text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-300 font-bold text-xl tracking-tight">Portal LS</span>
       </div>
@@ -280,7 +338,7 @@ function Sidebar({ menuItems, currentView, setView, onLogout }) {
             <h3 className="px-8 text-[11px] uppercase text-slate-500 font-bold mb-3 tracking-widest">{group.title}</h3>
             <ul className="space-y-1">
               {group.items.map((item, j) => (
-                <li key={j}>
+                <li key={item.id}>
                   <button
                     onClick={() => setView(item.id)}
                     className={`w-full flex items-center gap-3 px-8 py-3 text-sm transition-all duration-300 font-medium ${
@@ -368,6 +426,7 @@ function AdminDashboard() {
 
   const COLORS = ['#3b82f6', '#10b981', '#f97316', '#8b5cf6', '#ef4444', '#06b6d4', '#f43f5e', '#eab308'];
 
+  // Dados para os gráficos de pizza
   const companiesData = companies.map((c, i) => ({ 
     name: c.name, 
     value: 1, 
@@ -376,7 +435,7 @@ function AdminDashboard() {
 
   const projectsData = companies.map((c, i) => ({
     name: c.name,
-    value: projects.filter(p => p.companyId === c.id && p.status === 'active').length,
+    value: projects.filter(p => p.companyId === c.id).length,
     color: COLORS[i % COLORS.length]
   })).filter(d => d.value > 0);
 
@@ -393,6 +452,7 @@ function AdminDashboard() {
         <p className="text-slate-500">Visão consolidada da operação LS.</p>
       </div>
 
+      {/* Gráficos de Pizza */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white p-6 rounded-2xl border border-slate-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex flex-col items-center">
           <h3 className="text-sm text-slate-500 font-semibold uppercase tracking-wider mb-2">Empresas Atendidas ({companies.length})</h3>
@@ -447,6 +507,7 @@ function AdminDashboard() {
         </div>
       </div>
 
+      {/* Listas Detalhadas */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
           <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2"><Briefcase size={18}/> Projetos Ativos (Todos)</h3>
@@ -473,12 +534,13 @@ function AdminDashboard() {
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
           <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2"><Ticket size={18}/> Chamados Abertos (Por Cliente)</h3>
           {tickets.filter(t => t.status === 'open').length === 0 ? (
-             <EmptyState message="Nenhum chamado aberto." />
+             <EmptyState message="Nenhum chamado aberto no momento." />
           ) : (
             <ul className="space-y-3">
               {tickets.filter(t => t.status === 'open').map(ticket => {
                 const comp = companies.find(c => c.id === ticket.companyId);
                 const isExpanded = expandedTicketId === ticket.id;
+                
                 return (
                   <li key={ticket.id} className="p-3 hover:bg-slate-50 rounded-lg border border-slate-100 cursor-pointer transition-colors" onClick={() => setExpandedTicketId(isExpanded ? null : ticket.id)}>
                      <div className="flex justify-between items-center">
@@ -489,10 +551,15 @@ function AdminDashboard() {
                         <p className="text-xs text-slate-500">Cliente: {comp?.name || 'N/A'}</p>
                         <span className="text-xs font-medium px-2 py-1 bg-orange-100 text-orange-700 rounded-full">Aberto</span>
                      </div>
+                     
+                     {/* Detalhes do chamado aberto */}
                      {isExpanded && (
-                       <div className="mt-3 pt-3 border-t border-slate-100">
-                         <p className="text-sm text-slate-600 whitespace-pre-wrap">{ticket.description}</p>
-                         <p className="text-xs text-slate-400 mt-2">Aberto em: {new Date(ticket.date).toLocaleString()}</p>
+                       <div className="mt-3 pt-3 border-t border-slate-100 bg-white">
+                         <p className="text-sm text-slate-600 whitespace-pre-wrap leading-relaxed">{ticket.description}</p>
+                         <div className="mt-3 flex justify-between items-center">
+                           <p className="text-xs text-slate-400 font-mono">ID: {ticket.id} • Aberto em: {new Date(ticket.date).toLocaleDateString()}</p>
+                           <button className="text-xs text-blue-600 hover:underline font-medium">Visualizar &rarr;</button>
+                         </div>
                        </div>
                      )}
                   </li>
@@ -501,23 +568,6 @@ function AdminDashboard() {
             </ul>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function StatCard({ title, value, icon: Icon, color }) {
-  const gradient = color.includes('blue') ? 'bg-gradient-to-br from-blue-400 to-blue-600 shadow-blue-500/30' : 
-                   color.includes('emerald') ? 'bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-emerald-500/30' : 
-                   'bg-gradient-to-br from-orange-400 to-orange-600 shadow-orange-500/30';
-  return (
-    <div className="bg-white p-6 rounded-2xl border border-slate-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] flex items-center gap-5 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all duration-300 hover:-translate-y-1">
-      <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-white shadow-lg ${gradient}`}>
-        <Icon size={28} strokeWidth={1.5} />
-      </div>
-      <div>
-        <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">{title}</p>
-        <p className="text-3xl font-extrabold text-slate-800 tracking-tight">{value}</p>
       </div>
     </div>
   );
@@ -570,7 +620,7 @@ function AdminClients() {
 }
 
 function AdminRegisterCompany() {
-  const { setCompanies, generateId, setUsers, fetchSupabase, supabaseUrl, supabaseKey } = useContext(AppContext);
+  const { companies, setCompanies, generateId, users, setUsers, fetchSupabase, supabaseUrl, supabaseKey } = useContext(AppContext);
   const [name, setName] = useState('');
   const [cnpj, setCnpj] = useState('');
   const [clientEmail, setClientEmail] = useState('');
@@ -582,11 +632,10 @@ function AdminRegisterCompany() {
     e.preventDefault();
     setLoading(true);
     const newCompanyId = generateId('CMP');
-    
     const newCompany = { id: newCompanyId, name, cnpj };
     
     await fetchSupabase('/rest/v1/companies', { method: 'POST', body: JSON.stringify(newCompany) });
-    setCompanies(prev => [...prev, newCompany]);
+    setCompanies([...companies, newCompany]);
 
     if (clientEmail && clientPassword) {
       const authRes = await fetch(`${supabaseUrl}/auth/v1/signup`, {
@@ -606,11 +655,11 @@ function AdminRegisterCompany() {
           preferences: { bgColor: 'bg-slate-50' }
         };
         await fetchSupabase('/rest/v1/profiles', { method: 'POST', body: JSON.stringify(newProfile) });
-        setUsers(prev => [...prev, newProfile]);
+        setUsers([...users, newProfile]);
       }
     }
 
-    setSuccess(`Empresa ${name} cadastrada e integrada ao banco de dados! ID: ${newCompanyId}`);
+    setSuccess(`Empresa ${name} cadastrada com sucesso! ID: ${newCompanyId}`);
     setName(''); setCnpj(''); setClientEmail(''); setClientPassword('');
     setLoading(false);
     setTimeout(() => setSuccess(''), 5000);
@@ -654,7 +703,7 @@ function AdminRegisterCompany() {
         </div>
 
         <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 font-medium transition disabled:opacity-70">
-          {loading ? 'Cadastrando e Integrando...' : 'Gerar ID e Cadastrar Empresa'}
+          {loading ? 'Cadastrando...' : 'Cadastrar Empresa'}
         </button>
       </form>
     </div>
@@ -662,7 +711,7 @@ function AdminRegisterCompany() {
 }
 
 function AdminRegisterAdmin() {
-  const { setUsers, fetchSupabase, supabaseUrl, supabaseKey } = useContext(AppContext);
+  const { users, setUsers, fetchSupabase, supabaseUrl, supabaseKey } = useContext(AppContext);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -689,13 +738,15 @@ function AdminRegisterAdmin() {
         companyId: null,
         preferences: { bgColor: 'bg-slate-200' }
       };
+      
       await fetchSupabase('/rest/v1/profiles', { method: 'POST', body: JSON.stringify(newProfile) });
-      setUsers(prev => [...prev, newProfile]);
-      setSuccess(`Administrador ${name} salvo no Supabase com sucesso.`);
+      setUsers([...users, newProfile]);
+      setSuccess(`Administrador ${name} criado com sucesso no banco de dados.`);
       setName(''); setEmail(''); setPassword('');
     } else {
       setSuccess('Erro ao criar Auth no Supabase: ' + (authData.msg || 'Erro desconhecido'));
     }
+    
     setLoading(false);
     setTimeout(() => setSuccess(''), 3000);
   };
@@ -722,7 +773,7 @@ function AdminRegisterAdmin() {
           <input type="text" className="w-full p-2 border rounded" value={password} onChange={e => setPassword(e.target.value)} required disabled={loading} />
         </div>
         <button type="submit" disabled={loading} className="w-full bg-slate-800 text-white p-3 rounded-lg hover:bg-slate-900 transition disabled:opacity-70">
-          {loading ? 'Gravando no Supabase...' : 'Cadastrar Administrador'}
+          {loading ? 'Gravando...' : 'Cadastrar Administrador'}
         </button>
       </form>
     </div>
@@ -730,7 +781,7 @@ function AdminRegisterAdmin() {
 }
 
 function AdminRegisterUser() {
-  const { setUsers, fetchSupabase, supabaseUrl, supabaseKey, companies } = useContext(AppContext);
+  const { users, setUsers, companies, fetchSupabase, supabaseUrl, supabaseKey } = useContext(AppContext);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [cpf, setCpf] = useState('');
@@ -761,10 +812,7 @@ function AdminRegisterUser() {
          headers: { apikey: supabaseKey, 'Content-Type': 'application/json' },
          body: JSON.stringify({ email: cleanEmail, password: password })
       });
-      
       const authData = await authRes.json();
-      
-      console.log("RESPOSTA SUPABASE AUTH:", authRes.status, authData);
 
       if (authRes.ok && authData.user) {
         const newProfile = {
@@ -782,20 +830,19 @@ function AdminRegisterUser() {
         if (profileRes.error) {
           setError('Usuário criado no Auth, mas erro ao salvar perfil: ' + JSON.stringify(profileRes.error));
         } else {
-          setUsers(prev => [...prev, newProfile]);
-          setSuccess(`Usuário ${name} cadastrado com sucesso na tabela profiles.`);
+          setUsers([...users, newProfile]);
+          setSuccess(`Usuário ${name} cadastrado com sucesso.`);
           setName(''); setEmail(''); setCpf(''); setPassword(''); setConfirmPassword(''); setCompanyId('');
         }
       } else {
         setError(`Erro Auth API (Código ${authRes.status}): ` + JSON.stringify(authData));
       }
     } catch (err) {
-      console.error("Erro no fetch de signup:", err);
       setError('Erro de rede ou conexão ao tentar criar usuário: ' + err.message);
     }
     
     setLoading(false);
-    setTimeout(() => { setSuccess(''); setError(''); }, 15000);
+    setTimeout(() => { setSuccess(''); setError(''); }, 5000);
   };
 
   return (
@@ -854,7 +901,7 @@ function AdminRegisterUser() {
 }
 
 function AdminProjects() {
-  const { projects, setProjects, companies, users, generateId, fetchSupabase, history, setHistory } = useContext(AppContext);
+  const { projects, setProjects, companies, users, generateId, history, setHistory, fetchSupabase } = useContext(AppContext);
   const [isAdding, setIsAdding] = useState(false);
   const [loading, setLoading] = useState(false);
   const [viewingProject, setViewingProject] = useState(null);
@@ -862,8 +909,6 @@ function AdminProjects() {
   const [newProjName, setNewProjName] = useState('');
   const [newProjCompany, setNewProjCompany] = useState('');
   const [newContractTitle, setNewContractTitle] = useState('');
-  const [newProjType, setNewProjType] = useState('');
-  const [newProjStartDate, setNewProjStartDate] = useState('');
 
   // States para a edição detalhada
   const [editObservation, setEditObservation] = useState('');
@@ -890,18 +935,16 @@ function AdminProjects() {
       id: projectId,
       companyId: newProjCompany,
       name: newProjName,
-      type: newProjType,
-      startDate: newProjStartDate,
-      clientApproved: false,
       status: 'active',
-      contractId: contractId
+      contractId: contractId,
+      startDate: new Date().toISOString().split('T')[0]
     };
 
     await fetchSupabase('/rest/v1/projects', { method: 'POST', body: JSON.stringify(newProject) });
-
-    setProjects(prev => [...prev, newProject]);
+    setProjects([...projects, newProject]);
+    
     setIsAdding(false);
-    setNewProjName(''); setNewProjCompany(''); setNewContractTitle(''); setNewProjType(''); setNewProjStartDate('');
+    setNewProjName(''); setNewProjCompany(''); setNewContractTitle('');
     setLoading(false);
   };
 
@@ -930,7 +973,19 @@ function AdminProjects() {
       body: JSON.stringify(updates)
     });
 
-    setProjects(projects.map(p => p.id === viewingProject.id ? { ...p, ...updates } : p));
+    // Registra a atividade geral no histórico do projeto
+    const histId = generateId('HST');
+    const newHist = {
+      id: histId,
+      projectId: viewingProject.id,
+      description: 'Informações gerais, status ou arquivo do projeto atualizados pelo administrador.',
+      date: new Date().toISOString()
+    };
+    await fetchSupabase('/rest/v1/history', { method: 'POST', body: JSON.stringify(newHist) });
+    setHistory([...history, newHist]);
+
+    const newProjects = projects.map(p => p.id === viewingProject.id ? { ...p, ...updates } : p);
+    setProjects(newProjects);
     setViewingProject({ ...viewingProject, ...updates });
     setLoading(false);
   };
@@ -959,15 +1014,13 @@ function AdminProjects() {
     };
 
     await fetchSupabase('/rest/v1/history', { method: 'POST', body: JSON.stringify(newHist) });
-    setHistory(prev => [newHist, ...prev]);
+    setHistory([...history, newHist]);
     
-    // Atualiza também a observação geral do projeto para refletir o último status
     const updates = { observation: newObservation };
-    await fetchSupabase(`/rest/v1/projects?id=eq.${viewingProject.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(updates)
-    });
-    setProjects(projects.map(p => p.id === viewingProject.id ? { ...p, ...updates } : p));
+    await fetchSupabase(`/rest/v1/projects?id=eq.${viewingProject.id}`, { method: 'PATCH', body: JSON.stringify(updates) });
+    const newProjects = projects.map(p => p.id === viewingProject.id ? { ...p, ...updates } : p);
+    
+    setProjects(newProjects);
     setViewingProject({ ...viewingProject, ...updates });
 
     setNewObservation('');
@@ -977,8 +1030,10 @@ function AdminProjects() {
   // Visão Detalhada (Edição do Projeto)
   if (viewingProject) {
     const comp = companies.find(c => c.id === viewingProject.companyId);
-    // Filtra usuários que pertencem à empresa do projeto para poder vinculá-los
-    const companyUsers = users.filter(u => u.companyId === viewingProject.companyId && u.role === 'client');
+    
+    // Filtra usuários: Permite que QUALQUER usuário do sistema (todos) seja selecionado como responsável
+    const companyUsers = users;
+    
     const projHistory = history.filter(h => h.projectId === viewingProject.id).sort((a,b) => new Date(b.date) - new Date(a.date));
     const assignedUserName = users.find(u => u.id === viewingProject.assignedUserId)?.name;
 
@@ -1018,7 +1073,7 @@ function AdminProjects() {
               <form onSubmit={handleUpdateProject} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-sm font-semibold text-slate-700 mb-2">Usuário Responsável (Vinculado)</label>
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">Usuário Responsável (Admin/Cliente)</label>
                     <select 
                       className="w-full p-3 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none" 
                       value={editAssignedUser} 
@@ -1027,10 +1082,9 @@ function AdminProjects() {
                     >
                       <option value="">Nenhum usuário específico</option>
                       {companyUsers.map(u => (
-                        <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+                        <option key={u.id} value={u.id}>{u.name} ({u.role === 'admin' ? 'Admin' : 'Cliente'})</option>
                       ))}
                     </select>
-                    {companyUsers.length === 0 && <p className="text-xs text-orange-500 mt-1">Esta empresa não possui usuários cadastrados.</p>}
                   </div>
 
                   <div>
@@ -1066,7 +1120,7 @@ function AdminProjects() {
                   </div>
                 </div>
 
-                <div className="pt-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+                <div className="pt-4 flex flex-col sm:flex-row justify-between items-center gap-4 border-t border-slate-100">
                   <button type="button" onClick={handleDeleteProject} disabled={loading} className="w-full sm:w-auto px-4 py-2.5 text-red-600 bg-red-50 hover:bg-red-100 font-medium rounded-lg transition-colors">
                     Excluir Projeto
                   </button>
@@ -1147,7 +1201,7 @@ function AdminProjects() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Projetos Ativos</h1>
+          <h1 className="text-2xl font-bold text-slate-800">Projetos</h1>
           <p className="text-slate-500">Clique em um projeto para ver e editar os detalhes completos.</p>
         </div>
         <button onClick={() => setIsAdding(!isAdding)} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 transition-colors shadow-sm">
@@ -1158,7 +1212,7 @@ function AdminProjects() {
       {isAdding && (
         <div className="bg-white p-6 rounded-xl border border-blue-200 shadow-sm mb-6">
           <h3 className="font-bold text-slate-800 mb-4">Criar Novo Projeto</h3>
-          <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+          <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Nome do Projeto</label>
               <input type="text" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" value={newProjName} onChange={e=>setNewProjName(e.target.value)} required disabled={loading}/>
@@ -1171,18 +1225,10 @@ function AdminProjects() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Tipo</label>
-              <input type="text" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" value={newProjType} onChange={e=>setNewProjType(e.target.value)} required disabled={loading}/>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Data de Início</label>
-              <input type="date" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" value={newProjStartDate} onChange={e=>setNewProjStartDate(e.target.value)} required disabled={loading}/>
-            </div>
-            <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">ID Auxiliar de Contrato (Opcional)</label>
               <input type="text" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Ex: CTR-2025" value={newContractTitle} onChange={e=>setNewContractTitle(e.target.value)} disabled={loading}/>
             </div>
-            <div className="md:col-span-3 flex justify-end gap-2 mt-2">
+            <div className="md:col-span-2 flex justify-end gap-2 mt-2">
               <button type="button" onClick={() => setIsAdding(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded transition-colors" disabled={loading}>Cancelar</button>
               <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:opacity-70" disabled={loading}>
                 {loading ? 'Salvando...' : 'Salvar Projeto Inicial'}
@@ -1194,7 +1240,7 @@ function AdminProjects() {
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         {projects.length === 0 ? (
-          <div className="p-12"><EmptyState message="Nenhum projeto cadastrado no banco." /></div>
+          <div className="p-12"><EmptyState message="Nenhum projeto cadastrado." /></div>
         ) : (
           <ul className="divide-y divide-slate-100">
             {projects.map(proj => {
@@ -1323,7 +1369,13 @@ function ClientHome() {
               {myProjects.map(p => (
                 <li key={p.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
                   <span className="font-medium text-slate-700">{p.name}</span>
-                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">Em Andamento</span>
+                  <span className={`text-xs px-2 py-1 rounded font-bold ${
+                    p.status === 'active' ? 'bg-emerald-100 text-emerald-700' :
+                    p.status === 'paused' ? 'bg-orange-100 text-orange-700' :
+                    'bg-slate-200 text-slate-700'
+                  }`}>
+                    {p.status === 'active' ? 'Em Andamento' : p.status === 'paused' ? 'Pausado' : 'Encerrado'}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -1387,7 +1439,7 @@ function ClientProfile() {
 }
 
 function ClientProjects() {
-  const { currentUser, projects, contracts, approvals, setApprovals, history, users } = useContext(AppContext);
+  const { currentUser, projects, setProjects, contracts, approvals, setApprovals, history, users, fetchSupabase } = useContext(AppContext);
   const myProjects = projects.filter(p => p.companyId === currentUser.companyId);
   const [activeTab, setActiveTab] = useState('andamento');
   const [selectedProjectId, setSelectedProjectId] = useState(myProjects.length > 0 ? myProjects[0].id : null);
@@ -1401,13 +1453,19 @@ function ClientProjects() {
   }
 
   const selectedProject = myProjects.find(p => p.id === selectedProjectId);
-  const projContracts = contracts.filter(c => c.companyId === currentUser.companyId); 
+  const projContracts = contracts.filter(c => c.projectId === selectedProjectId); 
   const projApprovals = approvals.filter(a => a.projectId === selectedProjectId);
   const projHistory = history.filter(h => h.projectId === selectedProjectId).sort((a,b) => new Date(b.date) - new Date(a.date));
   
   const assignedUser = users.find(u => u.id === selectedProject?.assignedUserId);
 
-  const handleApprove = (approvalId) => {
+  const handleApprove = async (approvalId) => {
+    const approval = approvals.find(a => a.id === approvalId);
+    if(!approval) return;
+    await fetchSupabase(`/rest/v1/approvals?id=eq.${approvalId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ approved: !approval.approved })
+    });
     setApprovals(approvals.map(a => a.id === approvalId ? { ...a, approved: !a.approved } : a));
   };
 
@@ -1416,7 +1474,8 @@ function ClientProjects() {
       method: 'PATCH',
       body: JSON.stringify({ clientApproved: true })
     });
-    setProjects(projects.map(p => p.id === selectedProject.id ? { ...p, clientApproved: true } : p));
+    const newProjects = projects.map(p => p.id === selectedProject.id ? { ...p, clientApproved: true } : p);
+    setProjects(newProjects);
   };
 
   const tabs = [
@@ -1460,11 +1519,13 @@ function ClientProjects() {
                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 mb-4">
                     <FolderKanban size={32}/>
                  </div>
-                 <h3 className="text-xl font-bold text-slate-800">Projeto em Desenvolvimento Ativo</h3>
+                 <h3 className="text-xl font-bold text-slate-800">Status: {
+                    selectedProject?.status === 'active' ? 'Em Desenvolvimento' : 
+                    selectedProject?.status === 'paused' ? 'Pausado' : 'Encerrado'
+                 }</h3>
                  <p className="text-slate-500 mt-2 max-w-md mx-auto">A equipe LS está trabalhando no projeto "{selectedProject?.name}".</p>
                </div>
 
-               {/* Informações detalhadas inseridas pelo Admin */}
                <div className="max-w-3xl mx-auto space-y-4">
                  
                  {!selectedProject?.clientApproved ? (
@@ -1489,7 +1550,7 @@ function ClientProjects() {
 
                  {selectedProject?.observation && (
                    <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
-                     <h4 className="font-semibold text-slate-700 mb-2 flex items-center gap-2"><CheckSquare size={16}/> Observações do Projeto</h4>
+                     <h4 className="font-semibold text-slate-700 mb-2 flex items-center gap-2"><CheckSquare size={16}/> Última Atualização da Equipe</h4>
                      <p className="text-sm text-slate-600 whitespace-pre-wrap">{selectedProject.observation}</p>
                    </div>
                  )}
@@ -1498,7 +1559,7 @@ function ClientProjects() {
                    <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 flex items-center gap-3">
                       <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center"><Users size={20}/></div>
                       <div>
-                        <p className="text-xs text-blue-600 font-semibold uppercase tracking-wider">Usuário Responsável</p>
+                        <p className="text-xs text-blue-600 font-semibold uppercase tracking-wider">Responsável LS</p>
                         <p className="text-sm font-medium text-slate-800">{assignedUser.name}</p>
                       </div>
                    </div>
@@ -1526,7 +1587,7 @@ function ClientProjects() {
           {activeTab === 'contratos' && (
             <div className="space-y-4">
               <h3 className="font-semibold text-slate-700 mb-4">Contratos Anteriores</h3>
-              {projContracts.length === 0 ? <EmptyState message="Nenhum contrato histórico localizado." /> : 
+              {projContracts.length === 0 ? <EmptyState message="Nenhum contrato histórico localizado para este projeto." /> : 
                 <ul className="space-y-3">
                   {projContracts.map(c => (
                     <li key={c.id} className="flex justify-between items-center p-4 border border-slate-200 rounded-lg hover:bg-slate-50">
@@ -1591,23 +1652,25 @@ function ClientProjects() {
 }
 
 function ClientSupport() {
-  const { currentUser, tickets, setTickets, generateId } = useContext(AppContext);
+  const { currentUser, tickets, setTickets, generateId, fetchSupabase } = useContext(AppContext);
   const myTickets = tickets.filter(t => t.companyId === currentUser.companyId);
   
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [isOpening, setIsOpening] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setTickets(prev => [{
+    const newTicket = {
       id: generateId('TCK'),
       companyId: currentUser.companyId,
       title,
       description: desc,
       status: 'open',
       date: new Date().toISOString()
-    }, ...prev]);
+    };
+    await fetchSupabase('/rest/v1/tickets', { method: 'POST', body: JSON.stringify(newTicket) });
+    setTickets([newTicket, ...tickets]);
     setTitle(''); setDesc(''); setIsOpening(false);
   };
 
