@@ -567,8 +567,42 @@ function AdminDashboard() {
 }
 
 function AdminClients() {
-  const { companies, users } = useContext(AppContext);
-  
+  const { companies, setCompanies, users, fetchSupabase } = useContext(AppContext);
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [editCnpj, setEditCnpj] = useState('');
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleEditClick = (comp) => {
+    setEditingId(comp.id);
+    setEditName(comp.name);
+    setEditCnpj(comp.cnpj || '');
+    setDeleteConfirmId(null);
+  };
+
+  const handleSaveEdit = async (id) => {
+    setLoading(true);
+    const updates = { name: editName, cnpj: editCnpj };
+    await fetchSupabase(`/rest/v1/companies?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(updates) });
+    setCompanies(companies.map(c => c.id === id ? { ...c, ...updates } : c));
+    setEditingId(null);
+    setLoading(false);
+  };
+
+  const handleDeleteClick = (id) => {
+    setDeleteConfirmId(id);
+    setEditingId(null);
+  };
+
+  const handleConfirmDelete = async (id) => {
+    setLoading(true);
+    await fetchSupabase(`/rest/v1/companies?id=eq.${id}`, { method: 'DELETE' });
+    setCompanies(companies.filter(c => c.id !== id));
+    setDeleteConfirmId(null);
+    setLoading(false);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -591,16 +625,52 @@ function AdminClients() {
                 <th className="px-6 py-4 font-semibold">Razão Social / Nome</th>
                 <th className="px-6 py-4 font-semibold">CNPJ</th>
                 <th className="px-6 py-4 font-semibold">Usuários Vinculados</th>
+                <th className="px-6 py-4 font-semibold text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {companies.map(comp => (
                 <tr key={comp.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-4 font-mono text-xs">{comp.id}</td>
-                  <td className="px-6 py-4 font-medium text-slate-800">{comp.name}</td>
-                  <td className="px-6 py-4">{comp.cnpj || 'Não informado'}</td>
-                  <td className="px-6 py-4">
+                  <td className="px-6 py-4 font-mono text-xs align-middle">{comp.id}</td>
+                  
+                  {editingId === comp.id ? (
+                    <>
+                      <td className="px-6 py-4 align-middle">
+                        <input type="text" className="w-full p-1.5 border rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm" value={editName} onChange={e => setEditName(e.target.value)} disabled={loading} />
+                      </td>
+                      <td className="px-6 py-4 align-middle">
+                        <input type="text" className="w-full p-1.5 border rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm" value={editCnpj} onChange={e => setEditCnpj(e.target.value)} disabled={loading} />
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-6 py-4 font-medium text-slate-800 align-middle">{comp.name}</td>
+                      <td className="px-6 py-4 align-middle">{comp.cnpj || 'Não informado'}</td>
+                    </>
+                  )}
+
+                  <td className="px-6 py-4 align-middle">
                     {users.filter(u => u.companyId === comp.id).length} usuários
+                  </td>
+                  
+                  <td className="px-6 py-4 align-middle text-right">
+                    {editingId === comp.id ? (
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button onClick={() => handleSaveEdit(comp.id)} disabled={loading} className="text-[10px] font-medium px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded transition-colors disabled:opacity-70">Salvar</button>
+                        <button onClick={() => setEditingId(null)} disabled={loading} className="text-[10px] font-medium px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors disabled:opacity-70">Cancelar</button>
+                      </div>
+                    ) : deleteConfirmId === comp.id ? (
+                      <div className="flex items-center justify-end gap-1.5">
+                        <span className="text-[10px] text-red-600 font-bold mr-1">Excluir?</span>
+                        <button onClick={() => handleConfirmDelete(comp.id)} disabled={loading} className="text-[10px] font-bold px-2.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded transition-colors disabled:opacity-70">Sim</button>
+                        <button onClick={() => setDeleteConfirmId(null)} disabled={loading} className="text-[10px] font-medium px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors disabled:opacity-70">Não</button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button onClick={() => handleEditClick(comp)} className="text-[10px] font-medium px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors">Editar</button>
+                        <button onClick={() => handleDeleteClick(comp.id)} className="text-[10px] font-medium px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded transition-colors">Excluir</button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
