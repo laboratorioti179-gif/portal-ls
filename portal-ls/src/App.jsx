@@ -266,12 +266,6 @@ function LoginScreen({ onLogin }) {
               {loading ? 'Acessando...' : 'Entrar no Portal'}
             </button>
           </form>
-          
-          <div className="mt-6 p-4 bg-blue-50/50 rounded-xl text-center text-xs text-slate-500 border border-blue-100/50">
-            <p className="font-semibold text-slate-600 mb-1">Acessos de Demonstração:</p>
-            <p>Admin: jonathanpinheiro.ti@outlook.com / K1nder$202525</p>
-            <p className="mt-1">Cliente: contato@alpha.com / 123456</p>
-          </div>
         </div>
       </div>
 
@@ -1182,6 +1176,10 @@ function AdminFinancial() {
   const [loading, setLoading] = useState(false);
   const [expandedCompanyId, setExpandedCompanyId] = useState(null);
   
+  // States para ordenação e filtro
+  const [sortOrder, setSortOrder] = useState('asc'); // 'asc' ou 'desc'
+  const [statusFilter, setStatusFilter] = useState('all');
+
   // State for Add/Edit
   const [editingId, setEditingId] = useState(null);
   const [companyId, setCompanyId] = useState('');
@@ -1271,12 +1269,34 @@ function AdminFinancial() {
     setCompanies(companies.map(c => c.id === compId ? { ...c, paymentPlan: plan } : c));
   };
 
+  const handleApprovePayment = async (finId) => {
+    setLoading(true);
+    await fetchSupabase(`/rest/v1/financials?id=eq.${finId}`, { method: 'PATCH', body: JSON.stringify({ status: 'paid' }) });
+    setFinancials(financials.map(f => f.id === finId ? { ...f, status: 'paid' } : f));
+    setLoading(false);
+  };
+
+  const handleViewReceipt = (e, url) => {
+    e.stopPropagation();
+    if (url.startsWith('data:')) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'comprovante';
+      a.click();
+    } else {
+      window.open(url, '_blank');
+    }
+  };
+
   const getCompanyStatus = (compId) => {
     const companyFins = financials.filter(f => f.companyId === compId);
     if (companyFins.length === 0) return { label: 'Sem cobranças', color: 'bg-slate-100 text-slate-600' };
     
     const hasOverdue = companyFins.some(f => f.status === 'pending' && new Date(f.dueDate) < new Date(new Date().setHours(0,0,0,0)));
     if (hasOverdue) return { label: 'Atrasado', color: 'bg-red-100 text-red-700' };
+    
+    const hasInReview = companyFins.some(f => f.status === 'in_review');
+    if (hasInReview) return { label: 'Em Análise', color: 'bg-blue-100 text-blue-700' };
     
     const hasPending = companyFins.some(f => f.status === 'pending');
     if (hasPending) return { label: 'Pendente', color: 'bg-orange-100 text-orange-700' };
@@ -1380,51 +1400,101 @@ function AdminFinancial() {
                             </select>
                           </div>
 
-                          <div className="flex justify-between items-center mb-4 border-b pb-2 border-slate-200">
+                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 border-b pb-2 border-slate-200 gap-3">
                             <h4 className="font-bold text-slate-700">Cobranças Registradas ({compFins.length})</h4>
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                resetForm();
-                                setCompanyId(comp.id);
-                                setIsAdding(true);
-                                setTimeout(() => {
-                                  document.getElementById('admin-financial-top')?.scrollIntoView({ behavior: 'smooth' });
-                                }, 100);
-                              }}
-                              className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-colors"
-                            >
-                              <Plus size={14}/> Configurar Nova Parcela
-                            </button>
+                            <div className="flex flex-wrap items-center gap-2">
+                               <select 
+                                  className="text-xs border border-slate-300 rounded-lg p-1.5 bg-white text-slate-600 outline-none focus:ring-1 focus:ring-blue-500"
+                                  value={statusFilter}
+                                  onChange={(e) => { e.stopPropagation(); setStatusFilter(e.target.value); }}
+                               >
+                                  <option value="all">Todos os Status</option>
+                                  <option value="pending">Aguardando</option>
+                                  <option value="in_review">Em Análise</option>
+                                  <option value="paid">Pago</option>
+                               </select>
+                               <select 
+                                  className="text-xs border border-slate-300 rounded-lg p-1.5 bg-white text-slate-600 outline-none focus:ring-1 focus:ring-blue-500"
+                                  value={sortOrder}
+                                  onChange={(e) => { e.stopPropagation(); setSortOrder(e.target.value); }}
+                               >
+                                  <option value="asc">Vencimento (Mais recentes primeiro)</option>
+                                  <option value="desc">Vencimento (Mais antigos primeiro)</option>
+                               </select>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  resetForm();
+                                  setCompanyId(comp.id);
+                                  setIsAdding(true);
+                                  setTimeout(() => {
+                                    document.getElementById('admin-financial-top')?.scrollIntoView({ behavior: 'smooth' });
+                                  }, 100);
+                                }}
+                                className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-colors"
+                              >
+                                <Plus size={14}/> Configurar Nova Parcela
+                              </button>
+                            </div>
                           </div>
                           {compFins.length === 0 ? <span className="text-slate-400 text-sm">Nenhuma cobrança registrada para este cliente.</span> : (
-                            <div className="space-y-3">
-                              {compFins.map(f => (
-                                <div key={f.id} className={`flex flex-col sm:flex-row items-start sm:items-center justify-between border p-4 rounded-xl shadow-sm transition-colors ${f.status === 'paid' ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'}`}>
-                                  <div className="flex-1">
-                                    <p className={`font-bold ${f.status === 'paid' ? 'text-emerald-900' : 'text-slate-800'}`}>{f.description}</p>
-                                    <p className={`mt-1 text-xs ${f.status === 'paid' ? 'text-emerald-700' : 'text-slate-500'}`}>Valor: <span className={`font-bold ${f.status === 'paid' ? 'text-emerald-700' : 'text-blue-600'}`}>R$ {f.amount}</span> • Vencimento: {new Date(f.dueDate).toLocaleDateString()}</p>
-                                  </div>
-                                  
-                                  <div className="flex items-center gap-4 mt-3 sm:mt-0 w-full sm:w-auto justify-end">
-                                     <div className="flex gap-2">
-                                       <button onClick={(e) => { e.stopPropagation(); handleEditClick(f); }} className="text-xs font-medium px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors">Editar</button>
-                                       <button onClick={(e) => { e.stopPropagation(); handleDelete(f.id); }} className="text-xs font-medium px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded transition-colors">Excluir</button>
-                                     </div>
-                                  
-                                    <div className="text-right border-l pl-4 ml-2">
-                                      {f.status === 'paid' ? (
-                                        <div className="flex flex-col items-end">
-                                          <span className="text-emerald-600 font-bold flex items-center gap-1 bg-emerald-50 px-3 py-1 rounded-full text-xs"><CheckCircle2 size={14}/> Pago</span>
-                                          {f.receiptUrl && <a href="#" onClick={(e)=>e.preventDefault()} className="text-blue-600 hover:text-blue-700 font-medium text-[11px] mt-1.5 flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded transition-colors"><FileText size={12}/> Comprovante: {f.receiptUrl}</a>}
-                                        </div>
-                                      ) : (
-                                        <span className="text-orange-600 font-bold flex items-center gap-1 bg-orange-50 px-3 py-1 rounded-full text-xs"><Circle size={14}/> Aguardando</span>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              ))}
+                            <div className="border border-slate-200 rounded-xl overflow-x-auto bg-white shadow-sm">
+                              <table className="w-full text-left text-sm text-slate-600 whitespace-nowrap">
+                                <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500">
+                                  <tr>
+                                    <th className="px-4 py-3 font-semibold">Descrição</th>
+                                    <th className="px-4 py-3 font-semibold">Valor / Venc.</th>
+                                    <th className="px-4 py-3 font-semibold text-center">Status</th>
+                                    <th className="px-4 py-3 font-semibold text-right">Ações</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {compFins
+                                    .filter(f => statusFilter === 'all' ? true : f.status === statusFilter)
+                                    .sort((a,b) => sortOrder === 'asc' ? new Date(b.dueDate) - new Date(a.dueDate) : new Date(a.dueDate) - new Date(b.dueDate))
+                                    .map(f => (
+                                    <tr key={f.id} className={`hover:bg-slate-50 transition-colors ${f.status === 'paid' ? 'bg-emerald-50/50' : f.status === 'in_review' ? 'bg-blue-50/50' : ''}`}>
+                                      <td className={`px-4 py-3 font-medium ${f.status === 'paid' ? 'text-emerald-900' : 'text-slate-800'}`}>
+                                        {f.description}
+                                      </td>
+                                      <td className="px-4 py-3">
+                                        <span className={`font-bold ${f.status === 'paid' ? 'text-emerald-700' : 'text-blue-600'}`}>R$ {f.amount}</span>
+                                        <br/><span className="text-[11px] text-slate-500">{new Date(f.dueDate).toLocaleDateString()}</span>
+                                      </td>
+                                      <td className="px-4 py-3 text-center align-middle">
+                                        {f.status === 'paid' ? (
+                                          <div className="flex flex-col items-center">
+                                            <span className="text-emerald-600 font-bold flex items-center gap-1 bg-emerald-100 px-2.5 py-1 rounded-full text-[11px] w-max"><CheckCircle2 size={12}/> Pago</span>
+                                            {f.receiptUrl && (
+                                               (f.receiptUrl.startsWith('http') || f.receiptUrl.startsWith('data:')) ? 
+                                               <button onClick={(e) => handleViewReceipt(e, f.receiptUrl)} className="text-blue-600 hover:text-blue-700 font-medium text-[10px] mt-1 flex items-center gap-1"><FileText size={10}/> Visualizar Comprovante</button> :
+                                               <span className="text-red-500 font-medium text-[10px] mt-1 flex items-center gap-1" title="O upload falhou por bloqueio no banco de dados"><AlertCircle size={10}/> Falha no Upload</span>
+                                            )}
+                                          </div>
+                                        ) : f.status === 'in_review' ? (
+                                          <div className="flex flex-col items-center gap-1">
+                                            <span className="text-blue-600 font-bold flex items-center gap-1 bg-blue-100 px-2.5 py-1 rounded-full text-[11px] w-max"><Clock size={12}/> Em Análise</span>
+                                            {f.receiptUrl && (
+                                               (f.receiptUrl.startsWith('http') || f.receiptUrl.startsWith('data:')) ? 
+                                               <button onClick={(e) => handleViewReceipt(e, f.receiptUrl)} className="text-blue-600 hover:text-blue-700 font-medium text-[10px] flex items-center gap-1"><FileText size={10}/> Visualizar Comprovante</button> :
+                                               <span className="text-red-500 font-medium text-[10px] flex items-center gap-1" title="O upload falhou por bloqueio no banco de dados"><AlertCircle size={10}/> Falha no Upload</span>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <span className="text-orange-600 font-bold flex items-center gap-1 bg-orange-100 px-2.5 py-1 rounded-full text-[11px] w-max mx-auto"><Circle size={12}/> Aguardando</span>
+                                        )}
+                                      </td>
+                                      <td className="px-4 py-3 text-right align-middle">
+                                         <div className="flex items-center justify-end gap-1.5">
+                                           {f.status === 'in_review' && <button onClick={(e) => { e.stopPropagation(); handleApprovePayment(f.id); }} disabled={loading} className="text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1.5 rounded font-bold transition-colors disabled:opacity-70">Aprovar</button>}
+                                           <button onClick={(e) => { e.stopPropagation(); handleEditClick(f); }} className="text-[10px] font-medium px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors">Editar</button>
+                                           <button onClick={(e) => { e.stopPropagation(); handleDelete(f.id); }} className="text-[10px] font-medium px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded transition-colors">Excluir</button>
+                                         </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
                             </div>
                           )}
                         </div>
@@ -1893,18 +1963,38 @@ function ClientSupport() {
 }
 
 function ClientFinancial() {
-  const { currentUser, financials, setFinancials, fetchSupabase, companies } = useContext(AppContext);
-  const myFinancials = financials.filter(f => f.companyId === currentUser.companyId).sort((a,b) => new Date(b.dueDate) - new Date(a.dueDate));
+  const { currentUser, financials, setFinancials, fetchSupabase, companies, generateId, supabaseUrl, supabaseKey } = useContext(AppContext);
+  const myFinancials = financials.filter(f => f.companyId === currentUser.companyId);
   const [loading, setLoading] = useState(false);
   const myCompany = companies.find(c => c.id === currentUser.companyId);
+  
+  // States para ordenação e seleção
+  const [sortOrder, setSortOrder] = useState('asc'); // 'asc' ou 'desc'
+  const [selectedPayId, setSelectedPayId] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
 
   const handleUploadReceipt = async (finId, file) => {
     if(!file) return;
     setLoading(true);
-    const updates = { receiptUrl: file.name, status: 'paid' };
-    await fetchSupabase(`/rest/v1/financials?id=eq.${finId}`, { method: 'PATCH', body: JSON.stringify(updates) });
-    setFinancials(financials.map(f => f.id === finId ? { ...f, ...updates } : f));
-    setLoading(false);
+    
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = async () => {
+      const base64Url = reader.result;
+      const updates = { receiptUrl: base64Url, status: 'in_review' };
+      
+      await fetchSupabase(`/rest/v1/financials?id=eq.${finId}`, { method: 'PATCH', body: JSON.stringify(updates) });
+      setFinancials(financials.map(f => f.id === finId ? { ...f, ...updates } : f));
+      
+      setSelectedPayId('');
+      setSelectedFile(null);
+      setLoading(false);
+    };
+    
+    reader.onerror = () => {
+      alert("Erro ao processar a leitura do arquivo.");
+      setLoading(false);
+    };
   };
 
   return (
@@ -1933,45 +2023,106 @@ function ClientFinancial() {
           </div>
         ) : (
           <div className="text-left">
-            <h3 className="font-semibold mb-4 border-b pb-2">Suas Parcelas e Cobranças</h3>
-            <ul className="space-y-4">
-              {myFinancials.map(f => (
-                 <li key={f.id} className={`p-5 border rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-all ${f.status === 'paid' ? 'bg-emerald-50 border-emerald-200 shadow-sm' : 'bg-white border-blue-200 shadow-md'}`}>
-                   <div>
-                     <p className={`font-bold text-lg ${f.status === 'paid' ? 'text-emerald-900' : 'text-slate-800'}`}>{f.description}</p>
-                     <p className={`text-sm mt-1 ${f.status === 'paid' ? 'text-emerald-700' : 'text-slate-500'}`}>Vencimento: {new Date(f.dueDate).toLocaleDateString()}</p>
-                     <p className={`font-black mt-1 ${f.status === 'paid' ? 'text-emerald-700' : 'text-blue-600'}`}>R$ {f.amount}</p>
-                   </div>
-                   
-                   <div className="text-right w-full sm:w-auto">
-                     {f.status === 'paid' ? (
-                       <div className="flex flex-col items-end">
-                         <span className="bg-emerald-100 text-emerald-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2">
-                           <CheckCircle2 size={18}/> Pagamento Confirmado
-                         </span>
-                         {f.receiptUrl && <span className="text-xs font-medium text-slate-500 mt-2 flex items-center gap-1"><FileText size={12}/> Comprovante: {f.receiptUrl}</span>}
-                       </div>
-                     ) : (
-                       <div className="flex flex-col items-end gap-3 w-full">
-                         <span className="bg-orange-100 text-orange-700 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2">
-                           <Circle size={18}/> Aguardando Pagamento
-                         </span>
-                         <div className="mt-2 text-left w-full bg-blue-50/50 p-3 rounded-lg border border-blue-100">
-                           <label className="text-xs text-slate-600 font-semibold block mb-2">Fazer upload do comprovante:</label>
-                           <input 
-                             type="file" 
-                             accept="image/*,.pdf" 
-                             className="block w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer"
-                             onChange={e => handleUploadReceipt(f.id, e.target.files[0])}
-                             disabled={loading}
-                           />
-                         </div>
-                       </div>
-                     )}
-                   </div>
-                 </li>
-              ))}
-            </ul>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 border-b pb-2 gap-3">
+               <h3 className="font-semibold">Suas Parcelas e Cobranças</h3>
+               <select 
+                  className="text-xs border border-slate-300 rounded-lg p-1.5 bg-white text-slate-600 outline-none focus:ring-1 focus:ring-blue-500"
+                  value={sortOrder}
+                  onChange={(e) => setSortOrder(e.target.value)}
+               >
+                  <option value="asc">Vencimento (Mais recentes primeiro)</option>
+                  <option value="desc">Vencimento (Mais antigos primeiro)</option>
+               </select>
+            </div>
+
+            {myFinancials.some(f => f.status === 'pending') && (
+                <div className="mb-6 bg-slate-50 p-5 rounded-xl border border-slate-200 shadow-sm text-left">
+                   <label className="block text-sm font-bold text-slate-800 mb-2">Selecione a parcela que deseja pagar:</label>
+                   <select 
+                      className="w-full p-2.5 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none text-sm font-medium text-slate-700"
+                      value={selectedPayId}
+                      onChange={(e) => { setSelectedPayId(e.target.value); setSelectedFile(null); }}
+                   >
+                      <option value="">Nenhuma selecionada...</option>
+                      {myFinancials.filter(f => f.status === 'pending').sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate)).map(f => (
+                         <option key={f.id} value={f.id}>{f.description} - Vencimento: {new Date(f.dueDate).toLocaleDateString()} - R$ {f.amount}</option>
+                      ))}
+                   </select>
+
+                   {selectedPayId && (
+                      <div className="mt-4 bg-blue-50/80 p-4 rounded-lg border border-blue-200">
+                         <label className="text-xs text-slate-700 font-semibold block mb-2">Faça o upload do comprovante de pagamento:</label>
+                         <input 
+                            type="file" 
+                            accept="image/*,.pdf" 
+                            className="block w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-700 cursor-pointer"
+                            onChange={e => setSelectedFile(e.target.files[0])}
+                            disabled={loading}
+                         />
+                         {selectedFile && (
+                            <button 
+                              onClick={() => handleUploadReceipt(selectedPayId, selectedFile)}
+                              disabled={loading}
+                              className="mt-3 w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm py-2.5 px-4 rounded-lg transition-colors disabled:opacity-70 shadow-sm"
+                            >
+                              {loading ? 'Enviando...' : 'Enviar pagamento'}
+                            </button>
+                         )}
+                      </div>
+                   )}
+                </div>
+            )}
+
+            <div className="border border-slate-200 rounded-xl overflow-x-auto bg-white shadow-sm">
+              <table className="w-full text-left text-sm text-slate-600 whitespace-nowrap">
+                <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-5 py-4 font-semibold">Descrição da Parcela</th>
+                    <th className="px-5 py-4 font-semibold">Vencimento</th>
+                    <th className="px-5 py-4 font-semibold">Valor</th>
+                    <th className="px-5 py-4 font-semibold text-right">Status do Pagamento</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {myFinancials.sort((a,b) => sortOrder === 'asc' ? new Date(b.dueDate) - new Date(a.dueDate) : new Date(a.dueDate) - new Date(b.dueDate)).map(f => (
+                     <tr key={f.id} className={`hover:bg-slate-50 transition-all ${f.status === 'paid' ? 'bg-emerald-50/40' : f.status === 'in_review' ? 'bg-blue-50/40' : ''}`}>
+                       <td className={`px-5 py-4 font-bold ${f.status === 'paid' ? 'text-emerald-900' : f.status === 'in_review' ? 'text-blue-900' : 'text-slate-800'}`}>
+                         {f.description}
+                       </td>
+                       <td className={`px-5 py-4 font-medium ${f.status === 'paid' ? 'text-emerald-700' : f.status === 'in_review' ? 'text-blue-700' : 'text-slate-600'}`}>
+                         {new Date(f.dueDate).toLocaleDateString()}
+                       </td>
+                       <td className={`px-5 py-4 font-black ${f.status === 'paid' ? 'text-emerald-700' : f.status === 'in_review' ? 'text-blue-700' : 'text-blue-600'}`}>
+                         R$ {f.amount}
+                       </td>
+                       <td className="px-5 py-4 text-right align-middle">
+                         {f.status === 'paid' ? (
+                           <div className="flex flex-col items-end">
+                             <span className="bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 w-max ml-auto">
+                               <CheckCircle2 size={14}/> Pagamento Aprovado
+                             </span>
+                             {f.receiptUrl && <span className="text-[11px] font-medium text-slate-500 mt-1.5 flex items-center gap-1 justify-end"><FileText size={12}/> Comprovante: {f.receiptUrl.startsWith('data:') ? 'Anexado no sistema' : f.receiptUrl}</span>}
+                           </div>
+                         ) : f.status === 'in_review' ? (
+                           <div className="flex flex-col items-end">
+                             <span className="bg-blue-100 text-blue-700 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 w-max ml-auto">
+                               <Clock size={14}/> Em Análise
+                             </span>
+                             <span className="text-[11px] font-medium text-blue-600 mt-1.5">Aguardando aprovação do admin.</span>
+                           </div>
+                         ) : (
+                           <div className="flex flex-col items-end">
+                             <span className="bg-orange-100 text-orange-700 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 w-max ml-auto">
+                               <Circle size={14}/> Aguardando Pagamento
+                             </span>
+                           </div>
+                         )}
+                       </td>
+                     </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
