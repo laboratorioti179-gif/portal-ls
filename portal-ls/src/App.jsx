@@ -388,8 +388,7 @@ function AdminPortal() {
         { id: 'integrations', label: 'Integrações', icon: LinkIcon },
         { id: 'financial', label: 'Financeiro', icon: DollarSign },
         { id: 'register-admin', label: 'Cadastrar Admin', icon: ShieldAlert },
-        { id: 'register-company', label: 'Cadastrar Empresa', icon: Building2 },
-        { id: 'register-user', label: 'Criar Usuário', icon: UserPlus }
+        { id: 'register-company', label: 'Cadastrar Empresa', icon: Building2 }
       ]
     }
   ];
@@ -403,7 +402,6 @@ function AdminPortal() {
       case 'financial': return <AdminFinancial />;
       case 'register-admin': return <AdminRegisterAdmin />;
       case 'register-company': return <AdminRegisterCompany />;
-      case 'register-user': return <AdminRegisterUser />;
       default: return <AdminDashboard />;
     }
   };
@@ -775,126 +773,6 @@ function AdminRegisterAdmin() {
         </div>
         <button type="submit" disabled={loading} className="w-full bg-slate-800 text-white p-3 rounded-lg hover:bg-slate-900 transition disabled:opacity-70">
           {loading ? 'Gravando...' : 'Cadastrar Administrador'}
-        </button>
-      </form>
-    </div>
-  );
-}
-
-function AdminRegisterUser() {
-  const { users, setUsers, companies, fetchSupabase, supabaseUrl, supabaseKey } = useContext(AppContext);
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [cpf, setCpf] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [companyId, setCompanyId] = useState('');
-  const [success, setSuccess] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-    setSuccess('');
-
-    if (password !== confirmPassword) {
-      setError('As senhas não coincidem.');
-      setLoading(false);
-      return;
-    }
-
-    const cleanEmail = email.trim().toLowerCase();
-
-    try {
-      const authRes = await fetch(`${supabaseUrl}/auth/v1/signup`, {
-         method: 'POST',
-         headers: { apikey: supabaseKey, 'Content-Type': 'application/json' },
-         body: JSON.stringify({ email: cleanEmail, password: password })
-      });
-      const authData = await authRes.json();
-
-      if (authRes.ok && authData.user) {
-        const newProfile = {
-          id: authData.user.id,
-          role: 'client',
-          name: name.trim(), 
-          email: cleanEmail,
-          cpf: cpf.trim(),
-          companyId: companyId,
-          preferences: { bgColor: 'bg-slate-200' }
-        };
-        
-        const profileRes = await fetchSupabase('/rest/v1/profiles', { method: 'POST', body: JSON.stringify(newProfile) });
-        
-        if (profileRes.error) {
-          setError('Usuário criado no Auth, mas erro ao salvar perfil: ' + JSON.stringify(profileRes.error));
-        } else {
-          setUsers([...users, newProfile]);
-          setSuccess(`Usuário ${name} cadastrado com sucesso.`);
-          setName(''); setEmail(''); setCpf(''); setPassword(''); setConfirmPassword(''); setCompanyId('');
-        }
-      } else {
-        setError(`Erro Auth API (Código ${authRes.status}): ` + JSON.stringify(authData));
-      }
-    } catch (err) {
-      setError('Erro de rede ou conexão ao tentar criar usuário: ' + err.message);
-    }
-    
-    setLoading(false);
-    setTimeout(() => { setSuccess(''); setError(''); }, 5000);
-  };
-
-  return (
-    <div className="max-w-2xl mx-auto bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
-      <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-        <UserPlus className="text-blue-600"/> Criar Usuário (Cliente)
-      </h2>
-      
-      {success && <div className="mb-6 p-4 bg-green-50 text-green-700 rounded-lg break-all">{success}</div>}
-      {error && <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-lg break-all">{error}</div>}
-
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Nome Completo</label>
-            <input type="text" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500" value={name} onChange={e => setName(e.target.value)} required disabled={loading} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">CPF</label>
-            <input type="text" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500" value={cpf} onChange={e => setCpf(e.target.value)} required disabled={loading} placeholder="000.000.000-00" />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">E-mail de Acesso</label>
-          <input type="email" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500" value={email} onChange={e => setEmail(e.target.value)} required disabled={loading} />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Senha</label>
-            <input type="password" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500" value={password} onChange={e => setPassword(e.target.value)} required disabled={loading} minLength={6} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Confirmar Senha</label>
-            <input type="password" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required disabled={loading} minLength={6} />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Vincular à Empresa</label>
-          <select className="w-full p-2 border rounded bg-white focus:ring-2 focus:ring-blue-500" value={companyId} onChange={e => setCompanyId(e.target.value)} required disabled={loading}>
-            <option value="">Selecione a empresa do usuário...</option>
-            {companies.map(c => (
-              <option key={c.id} value={c.id}>{c.name} (CNPJ: {c.cnpj || 'N/A'})</option>
-            ))}
-          </select>
-        </div>
-
-        <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 transition disabled:opacity-70 mt-6">
-          {loading ? 'Cadastrando...' : 'Cadastrar Usuário'}
         </button>
       </form>
     </div>
@@ -1299,33 +1177,98 @@ function AdminPlaceholder({ title, desc }) {
 }
 
 function AdminFinancial() {
-  const { companies, financials, setFinancials, generateId, fetchSupabase } = useContext(AppContext);
+  const { companies, setCompanies, financials, setFinancials, generateId, fetchSupabase } = useContext(AppContext);
   const [isAdding, setIsAdding] = useState(false);
   const [loading, setLoading] = useState(false);
   const [expandedCompanyId, setExpandedCompanyId] = useState(null);
   
+  // State for Add/Edit
+  const [editingId, setEditingId] = useState(null);
   const [companyId, setCompanyId] = useState('');
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [dueDate, setDueDate] = useState('');
+  const [installmentsCount, setInstallmentsCount] = useState(1);
 
-  const handleAdd = async (e) => {
+  const handleAddOrEdit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    const newFin = {
-      id: generateId('FIN'),
-      companyId,
-      description,
-      amount,
-      dueDate,
-      status: 'pending',
-      receiptUrl: null
-    };
-    await fetchSupabase('/rest/v1/financials', { method: 'POST', body: JSON.stringify(newFin) });
-    setFinancials([newFin, ...financials]);
-    setIsAdding(false);
-    setCompanyId(''); setDescription(''); setAmount(''); setDueDate('');
+    
+    if (editingId) {
+      // Edit existing
+      const updates = { companyId, description, amount, dueDate };
+      await fetchSupabase(`/rest/v1/financials?id=eq.${editingId}`, { method: 'PATCH', body: JSON.stringify(updates) });
+      setFinancials(financials.map(f => f.id === editingId ? { ...f, ...updates } : f));
+    } else {
+      // Add new (batch generation)
+      const count = parseInt(installmentsCount, 10) || 1;
+      const newFins = [];
+      
+      // Tratamento nativo para garantir que o fuso horário local não altere o dia no banco
+      const [year, month, day] = dueDate.split('-').map(Number);
+      const baseDate = new Date(year, month - 1, day);
+
+      for (let i = 0; i < count; i++) {
+        const currentDueDate = new Date(baseDate.getFullYear(), baseDate.getMonth() + i, baseDate.getDate());
+        
+        const yearStr = currentDueDate.getFullYear();
+        const monthStr = String(currentDueDate.getMonth() + 1).padStart(2, '0');
+        const dayStr = String(currentDueDate.getDate()).padStart(2, '0');
+        const formattedDate = `${yearStr}-${monthStr}-${dayStr}`;
+        
+        const formattedDesc = count > 1 ? `${description} (${i + 1}/${count})` : description;
+
+        const newFin = {
+          id: generateId('FIN'),
+          companyId,
+          description: formattedDesc,
+          amount,
+          dueDate: formattedDate,
+          status: 'pending',
+          receiptUrl: null
+        };
+        await fetchSupabase('/rest/v1/financials', { method: 'POST', body: JSON.stringify(newFin) });
+        newFins.push(newFin);
+      }
+      
+      setFinancials([...newFins, ...financials]);
+    }
+    
+    resetForm();
     setLoading(false);
+  };
+
+  const handleEditClick = (fin) => {
+    setEditingId(fin.id);
+    setCompanyId(fin.companyId);
+    setDescription(fin.description);
+    setAmount(fin.amount);
+    setDueDate(fin.dueDate);
+    setInstallmentsCount(1);
+    setIsAdding(true);
+    setTimeout(() => {
+      document.getElementById('admin-financial-top')?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+  };
+
+  const handleDelete = async (finId) => {
+    if (window.confirm('Tem certeza que deseja excluir esta cobrança?')) {
+      setLoading(true);
+      await fetchSupabase(`/rest/v1/financials?id=eq.${finId}`, { method: 'DELETE' });
+      setFinancials(financials.filter(f => f.id !== finId));
+      setLoading(false);
+    }
+  };
+
+  const resetForm = () => {
+    setIsAdding(false);
+    setEditingId(null);
+    setCompanyId(''); setDescription(''); setAmount(''); setDueDate(''); setInstallmentsCount(1);
+  };
+
+  const handleUpdatePlan = async (compId, plan) => {
+    await fetchSupabase(`/rest/v1/companies?id=eq.${compId}`, { method: 'PATCH', body: JSON.stringify({ paymentPlan: plan }) });
+    setCompanies(companies.map(c => c.id === compId ? { ...c, paymentPlan: plan } : c));
   };
 
   const getCompanyStatus = (compId) => {
@@ -1342,21 +1285,21 @@ function AdminFinancial() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" id="admin-financial-top">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Financeiro Administrativo</h1>
           <p className="text-slate-500">Gestão de cobranças e status de pagamento das empresas.</p>
         </div>
-        <button onClick={() => setIsAdding(!isAdding)} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 transition-colors shadow-sm">
-          <Plus size={18}/> Nova Cobrança
+        <button onClick={() => { resetForm(); setIsAdding(!isAdding); }} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 transition-colors shadow-sm">
+          <Plus size={18}/> Nova Parcela (Geral)
         </button>
       </div>
 
       {isAdding && (
         <div className="bg-white p-6 rounded-xl border border-blue-200 shadow-sm mb-6">
-          <h3 className="font-bold text-slate-800 mb-4">Criar Nova Cobrança (Card de Pagamento)</h3>
-          <form onSubmit={handleAdd} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+          <h3 className="font-bold text-slate-800 mb-4">{editingId ? 'Editar Parcela / Cobrança' : 'Configurar Parcela do Cliente'}</h3>
+          <form onSubmit={handleAddOrEdit} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Empresa</label>
               <select className="w-full p-2 border rounded bg-white focus:ring-2 focus:ring-blue-500 outline-none" value={companyId} onChange={e=>setCompanyId(e.target.value)} required disabled={loading}>
@@ -1364,22 +1307,28 @@ function AdminFinancial() {
                 {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Descrição / Parcela</label>
-              <input type="text" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Ex: Parcela 1/3 - Desenvolvimento" value={description} onChange={e=>setDescription(e.target.value)} required disabled={loading}/>
+            <div className={editingId ? 'md:col-span-2' : ''}>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Descrição Base</label>
+              <input type="text" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" placeholder={editingId ? "Ex: Parcela 1/3 - Desenvolvimento" : "Ex: Desenvolvimento"} value={description} onChange={e=>setDescription(e.target.value)} required disabled={loading}/>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Valor (R$)</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Valor (R$ / un.)</label>
               <input type="text" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Ex: 1500,00" value={amount} onChange={e=>setAmount(e.target.value)} required disabled={loading}/>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Vencimento</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">{editingId ? 'Vencimento' : '1º Vencimento'}</label>
               <input type="date" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" value={dueDate} onChange={e=>setDueDate(e.target.value)} required disabled={loading}/>
             </div>
-            <div className="md:col-span-4 flex justify-end gap-2 mt-2">
-              <button type="button" onClick={() => setIsAdding(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded transition-colors" disabled={loading}>Cancelar</button>
+            {!editingId && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Qtd. de Parcelas</label>
+                <input type="number" min="1" max="100" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none" value={installmentsCount} onChange={e=>setInstallmentsCount(e.target.value)} required disabled={loading}/>
+              </div>
+            )}
+            <div className="md:col-span-5 flex justify-end gap-2 mt-2">
+              <button type="button" onClick={resetForm} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded transition-colors" disabled={loading}>Cancelar</button>
               <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:opacity-70" disabled={loading}>
-                {loading ? 'Criando...' : 'Criar Card de Pagamento'}
+                {loading ? 'Salvando...' : (editingId ? 'Salvar Alterações' : 'Gerar Parcelas')}
               </button>
             </div>
           </form>
@@ -1417,24 +1366,62 @@ function AdminFinancial() {
                     <tr className="bg-slate-50/50">
                       <td colSpan="3" className="px-6 py-6 border-t border-slate-100">
                         <div className="max-w-3xl">
-                          <h4 className="font-bold text-slate-700 mb-4 border-b pb-2 border-slate-200">Cobranças Registradas ({compFins.length})</h4>
+                          <div className="mb-6 bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                            <label className="block text-sm font-bold text-slate-800 mb-2">Plano de Pagamento Acordado</label>
+                            <select 
+                              className="w-full p-2.5 border border-slate-300 rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none text-sm font-medium text-slate-700"
+                              value={comp.paymentPlan || ''}
+                              onChange={(e) => handleUpdatePlan(comp.id, e.target.value)}
+                            >
+                              <option value="">Selecione o plano de pagamento para este cliente...</option>
+                              <option value="Avista Total + Mensalidade">Avista Total + Mensalidade (Pago o desenvolvimento e mensalidade de suporte)</option>
+                              <option value="Entrada 40% + Diluição + Mensalidade">Entrada 40% + Diluição + Mensalidade (Pago 40% e diluído o resto na mensalidade)</option>
+                              <option value="Parcelado total na mensalidade">Parcelado total na mensalidade (Desenvolvimento parcelado nas mensalidades)</option>
+                            </select>
+                          </div>
+
+                          <div className="flex justify-between items-center mb-4 border-b pb-2 border-slate-200">
+                            <h4 className="font-bold text-slate-700">Cobranças Registradas ({compFins.length})</h4>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                resetForm();
+                                setCompanyId(comp.id);
+                                setIsAdding(true);
+                                setTimeout(() => {
+                                  document.getElementById('admin-financial-top')?.scrollIntoView({ behavior: 'smooth' });
+                                }, 100);
+                              }}
+                              className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 transition-colors"
+                            >
+                              <Plus size={14}/> Configurar Nova Parcela
+                            </button>
+                          </div>
                           {compFins.length === 0 ? <span className="text-slate-400 text-sm">Nenhuma cobrança registrada para este cliente.</span> : (
                             <div className="space-y-3">
                               {compFins.map(f => (
-                                <div key={f.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-white border border-slate-200 p-4 rounded-xl shadow-sm">
-                                  <div>
-                                    <p className="font-bold text-slate-800">{f.description}</p>
-                                    <p className="text-slate-500 mt-1 text-xs">Valor: <span className="font-bold text-blue-600">R$ {f.amount}</span> • Vencimento: {new Date(f.dueDate).toLocaleDateString()}</p>
+                                <div key={f.id} className={`flex flex-col sm:flex-row items-start sm:items-center justify-between border p-4 rounded-xl shadow-sm transition-colors ${f.status === 'paid' ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'}`}>
+                                  <div className="flex-1">
+                                    <p className={`font-bold ${f.status === 'paid' ? 'text-emerald-900' : 'text-slate-800'}`}>{f.description}</p>
+                                    <p className={`mt-1 text-xs ${f.status === 'paid' ? 'text-emerald-700' : 'text-slate-500'}`}>Valor: <span className={`font-bold ${f.status === 'paid' ? 'text-emerald-700' : 'text-blue-600'}`}>R$ {f.amount}</span> • Vencimento: {new Date(f.dueDate).toLocaleDateString()}</p>
                                   </div>
-                                  <div className="text-right mt-3 sm:mt-0">
-                                    {f.status === 'paid' ? (
-                                      <div className="flex flex-col items-end">
-                                        <span className="text-emerald-600 font-bold flex items-center gap-1 bg-emerald-50 px-3 py-1 rounded-full text-xs"><CheckCircle2 size={14}/> Pago</span>
-                                        {f.receiptUrl && <a href="#" onClick={(e)=>e.preventDefault()} className="text-blue-600 hover:text-blue-700 font-medium text-[11px] mt-1.5 flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded transition-colors"><FileText size={12}/> Ver Comprovante</a>}
-                                      </div>
-                                    ) : (
-                                      <span className="text-orange-600 font-bold flex items-center gap-1 bg-orange-50 px-3 py-1 rounded-full text-xs"><Circle size={14}/> Aguardando</span>
-                                    )}
+                                  
+                                  <div className="flex items-center gap-4 mt-3 sm:mt-0 w-full sm:w-auto justify-end">
+                                     <div className="flex gap-2">
+                                       <button onClick={(e) => { e.stopPropagation(); handleEditClick(f); }} className="text-xs font-medium px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors">Editar</button>
+                                       <button onClick={(e) => { e.stopPropagation(); handleDelete(f.id); }} className="text-xs font-medium px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded transition-colors">Excluir</button>
+                                     </div>
+                                  
+                                    <div className="text-right border-l pl-4 ml-2">
+                                      {f.status === 'paid' ? (
+                                        <div className="flex flex-col items-end">
+                                          <span className="text-emerald-600 font-bold flex items-center gap-1 bg-emerald-50 px-3 py-1 rounded-full text-xs"><CheckCircle2 size={14}/> Pago</span>
+                                          {f.receiptUrl && <a href="#" onClick={(e)=>e.preventDefault()} className="text-blue-600 hover:text-blue-700 font-medium text-[11px] mt-1.5 flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded transition-colors"><FileText size={12}/> Comprovante: {f.receiptUrl}</a>}
+                                        </div>
+                                      ) : (
+                                        <span className="text-orange-600 font-bold flex items-center gap-1 bg-orange-50 px-3 py-1 rounded-full text-xs"><Circle size={14}/> Aguardando</span>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                               ))}
@@ -1906,9 +1893,10 @@ function ClientSupport() {
 }
 
 function ClientFinancial() {
-  const { currentUser, financials, setFinancials, fetchSupabase } = useContext(AppContext);
+  const { currentUser, financials, setFinancials, fetchSupabase, companies } = useContext(AppContext);
   const myFinancials = financials.filter(f => f.companyId === currentUser.companyId).sort((a,b) => new Date(b.dueDate) - new Date(a.dueDate));
   const [loading, setLoading] = useState(false);
+  const myCompany = companies.find(c => c.id === currentUser.companyId);
 
   const handleUploadReceipt = async (finId, file) => {
     if(!file) return;
@@ -1926,6 +1914,14 @@ function ClientFinancial() {
         <p className="text-slate-600">Portal de pagamentos, envio de comprovantes e histórico de faturas.</p>
       </div>
 
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 shadow-sm flex items-center justify-between">
+        <div>
+          <h3 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-1">Plano de Pagamento Vigente</h3>
+          <p className="text-lg font-black text-blue-900">{myCompany?.paymentPlan || 'Plano em definição pelo administrador'}</p>
+        </div>
+        <CreditCard className="text-blue-300 hidden sm:block" size={48} />
+      </div>
+
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 text-center">
         {myFinancials.length === 0 ? (
           <div>
@@ -1940,11 +1936,11 @@ function ClientFinancial() {
             <h3 className="font-semibold mb-4 border-b pb-2">Suas Parcelas e Cobranças</h3>
             <ul className="space-y-4">
               {myFinancials.map(f => (
-                 <li key={f.id} className={`p-5 border rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-all ${f.status === 'paid' ? 'bg-slate-50 border-slate-200' : 'bg-white border-blue-200 shadow-md'}`}>
+                 <li key={f.id} className={`p-5 border rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-all ${f.status === 'paid' ? 'bg-emerald-50 border-emerald-200 shadow-sm' : 'bg-white border-blue-200 shadow-md'}`}>
                    <div>
-                     <p className="font-bold text-slate-800 text-lg">{f.description}</p>
-                     <p className="text-sm text-slate-500 mt-1">Vencimento: {new Date(f.dueDate).toLocaleDateString()}</p>
-                     <p className="font-black text-blue-600 mt-1">R$ {f.amount}</p>
+                     <p className={`font-bold text-lg ${f.status === 'paid' ? 'text-emerald-900' : 'text-slate-800'}`}>{f.description}</p>
+                     <p className={`text-sm mt-1 ${f.status === 'paid' ? 'text-emerald-700' : 'text-slate-500'}`}>Vencimento: {new Date(f.dueDate).toLocaleDateString()}</p>
+                     <p className={`font-black mt-1 ${f.status === 'paid' ? 'text-emerald-700' : 'text-blue-600'}`}>R$ {f.amount}</p>
                    </div>
                    
                    <div className="text-right w-full sm:w-auto">
