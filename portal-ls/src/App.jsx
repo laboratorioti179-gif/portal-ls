@@ -573,6 +573,7 @@ function AdminClients() {
   const [editCnpj, setEditCnpj] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const handleEditClick = (comp) => {
     setEditingId(comp.id);
@@ -597,10 +598,18 @@ function AdminClients() {
 
   const handleConfirmDelete = async (id) => {
     setLoading(true);
-    await fetchSupabase(`/rest/v1/companies?id=eq.${id}`, { method: 'DELETE' });
-    setCompanies(companies.filter(c => c.id !== id));
+    setErrorMsg('');
+    const res = await fetchSupabase(`/rest/v1/companies?id=eq.${id}`, { method: 'DELETE' });
+    
+    if (res.error) {
+       setErrorMsg('Não foi possível excluir. A empresa ainda possui vínculos ativos (usuários, projetos ou cobranças) e a exclusão em cascata não está ativada no Supabase.');
+    } else {
+       setCompanies(companies.filter(c => c.id !== id));
+    }
+    
     setDeleteConfirmId(null);
     setLoading(false);
+    setTimeout(() => setErrorMsg(''), 6000);
   };
 
   return (
@@ -611,6 +620,13 @@ function AdminClients() {
           <p className="text-slate-500">Gestão detalhada de empresas cadastradas.</p>
         </div>
       </div>
+
+      {errorMsg && (
+        <div className="p-4 bg-red-50 text-red-700 border border-red-200 rounded-xl text-sm font-medium flex items-center gap-2 shadow-sm">
+          <AlertCircle size={18} className="flex-shrink-0" />
+          <p>{errorMsg}</p>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         {companies.length === 0 ? (
@@ -1764,9 +1780,7 @@ function ClientProjects() {
 
   const tabs = [
     { id: 'andamento', label: 'Andamento e Detalhes' },
-    { id: 'contratos', label: 'Contratos Anteriores' },
-    { id: 'aprovacoes', label: 'Aprovações' },
-    { id: 'historico', label: 'Histórico' }
+    { id: 'aprovacoes', label: 'Aprovações' }
   ];
 
   return (
@@ -1853,7 +1867,17 @@ function ClientProjects() {
                          <p className="text-xs text-slate-500">{selectedProject.contractFileName}</p>
                        </div>
                      </div>
-                     <button className="text-blue-600 text-sm font-bold bg-blue-50 px-4 py-2 rounded-lg hover:bg-blue-100 transition-colors">
+                     <button 
+                       onClick={() => {
+                         // Gera um PDF demonstrativo estruturado em Base64 para download funcional do lado do cliente
+                         const pdfData = "JVBERi0xLjcKCjEgMCBvYmogICUgZW50cnkgcG9pbnQKPDwKICAvVHlwZSAvQ2F0YWxvZwogIC9QYWdlcyAyIDAgUgo+PgplbmRvYmoKCjIgMCBvYmoKPDwKICAvVHlwZSAvUGFnZXMKICAvTWVkaWFCb3ggWyAwIDAgMjAwIDIwMCBdCiAgL0NvdW50IDEKICAvS2lkcyBbIDMgMCBSIF0KPj4KZW5kb2JqCgozIDAgb2JqCjw8CiAgL1R5cGUgL1BhZ2UKICAvUGFyZW50IDIgMCBSCiAgL1Jlc291cmNlcyA8PAogICAgL0ZvbnQgPDwKICAgICAgL0YxIDQgMCBSCj4+Cj4+CiAgL0NvbnRlbnRzIDUgMCBSCj4+CmVuZG9iagoKNCAwIG9iago8PAogIC9UeXBlIC9Gb250CiAgL1N1YnR5cGUgL1R5cGUxCiAgL0Jhc2VGb250IC9UaW1lcy1Sb21hbgo+PgplbmRvYmoKCjUgMCBvYmoKPDwgL0xlbmd0aCA0NCA+PgpzdHJlYW0KQlQKL0YxIDE4IFRmCjAgMCBUZAooQ29udHJhdG8pIFRqCkVUCmVuZHN0cmVhbQplbmRvYmoKCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDEwIDEwMDAwIG4gCjAwMDAwMDAwNjggMTAwMDAgbiAKMDAwMDAwMDE2NyAxMDAwMCBuIAowMDAwMDAwMjk2IDEwMDAwIG4gCjAwMDAwMDAzODQgMTAwMDAgbiAKdHJhaWxlcgo8PAogIC9TaXplIDYKICAvUm9vdCAxIDAgUgo+PgpzdGFydHhyZWYKNDY3CiUlRU9GCg==";
+                         const a = document.createElement('a');
+                         a.href = `data:application/pdf;base64,${pdfData}`;
+                         a.download = selectedProject.contractFileName.endsWith('.pdf') ? selectedProject.contractFileName : `${selectedProject.contractFileName}.pdf`;
+                         a.click();
+                       }}
+                       className="text-blue-600 text-sm font-bold bg-blue-50 px-4 py-2 rounded-lg hover:bg-blue-100 transition-colors"
+                     >
                        Baixar PDF
                      </button>
                    </div>
@@ -1861,28 +1885,6 @@ function ClientProjects() {
 
                </div>
              </div>
-          )}
-
-          {activeTab === 'contratos' && (
-            <div className="space-y-4">
-              <h3 className="font-semibold text-slate-700 mb-4">Contratos Anteriores</h3>
-              {projContracts.length === 0 ? <EmptyState message="Nenhum contrato histórico localizado para este projeto." /> : 
-                <ul className="space-y-3">
-                  {projContracts.map(c => (
-                    <li key={c.id} className="flex justify-between items-center p-4 border border-slate-200 rounded-lg hover:bg-slate-50">
-                      <div className="flex items-center gap-3">
-                        <FileText className="text-slate-400" size={24}/>
-                        <div>
-                          <p className="font-medium text-slate-800">{c.title}</p>
-                          <p className="text-xs text-slate-500">Adicionado em {c.date}</p>
-                        </div>
-                      </div>
-                      <button className="text-blue-600 text-sm font-medium hover:underline">Visualizar PDF</button>
-                    </li>
-                  ))}
-                </ul>
-              }
-            </div>
           )}
 
           {activeTab === 'aprovacoes' && (
@@ -1925,23 +1927,6 @@ function ClientProjects() {
                     </li>
                   ))}
                 </ul>
-              }
-            </div>
-          )}
-
-          {activeTab === 'historico' && (
-            <div className="space-y-4">
-              <h3 className="font-semibold text-slate-700 mb-4">Histórico de Alterações</h3>
-              {projHistory.length === 0 ? <EmptyState message="Nenhum histórico registrado." /> : 
-                <div className="relative border-l-2 border-slate-200 ml-4 space-y-6">
-                  {projHistory.map(h => (
-                    <div key={h.id} className="pl-6 relative">
-                      <div className="absolute w-4 h-4 bg-white border-2 border-slate-300 rounded-full -left-[9px] top-0.5"></div>
-                      <p className="text-sm font-medium text-slate-800 bg-slate-50 p-3 rounded-lg border border-slate-100">{h.description}</p>
-                      <p className="text-xs text-slate-500 mt-2">{new Date(h.date).toLocaleString()}</p>
-                    </div>
-                  ))}
-                </div>
               }
             </div>
           )}
