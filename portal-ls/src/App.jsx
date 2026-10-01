@@ -1,4 +1,5 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
+import { createClient } from '@supabase/supabase-js';
 import { 
   LayoutDashboard, Users, FolderKanban, Settings, LogOut, 
   Ticket, FileText, CheckSquare, Clock, CreditCard, PaintBucket, 
@@ -9,164 +10,227 @@ import {
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 
 // --- SUPABASE CONFIGURATION ---
-const supabaseUrl = 'https://zguultsumjizmgjfypoi.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpndXVsdHN1bWppem1namZ5cG9pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NTg2ODcsImV4cCI6MjA5NjQzNDY4N30.qBBZb0F_pf3QnofXMlAsuauJYXj4zwe-snrfxyAX_CA';
+// Configure no .env do Vite:
+// VITE_SUPABASE_URL=https://SEU-PROJETO.supabase.co
+// VITE_SUPABASE_ANON_KEY=sua_chave_anon_ou_publishable
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Helper nativo para integrações com REST API do Supabase
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error('Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no arquivo .env');
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+});
+
+// Helper compatível com as chamadas REST já existentes no projeto.
+// IMPORTANTE: o Bearer agora é o access_token do usuário autenticado, não a anon key.
 const fetchSupabase = async (path, options = {}) => {
   try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      return { data: null, error: { message: 'Sessão expirada ou usuário não autenticado.' } };
+    }
+
     const res = await fetch(`${supabaseUrl}${path}`, {
       ...options,
       headers: {
         apikey: supabaseKey,
-        Authorization: `Bearer ${supabaseKey}`,
+        Authorization: `Bearer ${session.access_token}`,
         'Content-Type': 'application/json',
-        'Prefer': 'return=representation',
-        ...(options.headers || {})
-      }
+        Prefer: 'return=representation',
+        ...(options.headers || {}),
+      },
     });
-    const data = await res.json();
+
+    const raw = await res.text();
+    const data = raw ? JSON.parse(raw) : null;
     return { data: res.ok ? data : null, error: res.ok ? null : data };
   } catch (err) {
     return { data: null, error: err };
   }
 };
 
-// --- CONTEXT & INITIAL STATE ---
 const AppContext = createContext();
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [users, setUsers] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [projects, setProjects] = useState([]);
-  
   const [tickets, setTickets] = useState([]);
   const [contracts, setContracts] = useState([]);
   const [approvals, setApprovals] = useState([]);
   const [history, setHistory] = useState([]);
   const [financials, setFinancials] = useState([]);
 
+  const clearData = () => {
+    setUsers([]); setCompanies([]); setProjects([]); setTickets([]);
+    setContracts([]); setApprovals([]); setHistory([]); setFinancials([]);
+  };
+
+  const loadData = async () => {
+    const endpoints = [
+      ['companies', setCompanies],
+      ['projects', setProjects],
+      ['profiles', setUsers],
+      ['tickets', setTickets],
+      ['history', setHistory],
+      ['contracts', setContracts],
+      ['approvals', setApprovals],
+      ['financials', setFinancials],
+    ];
+
+    const results = await Promise.all(
+      endpoints.map(async ([table, setter]) => {
+        const result = await fetchSupabase(`/rest/v1/${table}?select=*`);
+        if (result.error) console.error(`Erro ao carregar ${table}:`, result.error);
+        else setter(result.data || []);
+        return result;
+      })
+    );
+
+    return results.every(r => !r.error);
+  };
+
+  const loadProfile = async (authUser) => {
+    if (!authUser?.id) return null;
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', authUser.id)
+      .single();
+
+    if (error) {
+      console.error('Perfil não encontrado:', error);
+      return null;
+    }
+
+    setCurrentUser(data);
+    return data;
+  };
+
   useEffect(() => {
-    const loadData = async () => {
-      const comps = await fetchSupabase('/rest/v1/companies?select=*');
-      if (comps.data) setCompanies(comps.data);
+    let mounted = true;
 
-      const projs = await fetchSupabase('/rest/v1/projects?select=*');
-      if (projs.data) setProjects(projs.data);
+    const bootstrap = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!mounted) return;
 
-      const profs = await fetchSupabase('/rest/v1/profiles?select=*');
-      if (profs.data) setUsers(profs.data);
-
-      const tks = await fetchSupabase('/rest/v1/tickets?select=*');
-      if (tks.data) setTickets(tks.data);
-      
-      const hist = await fetchSupabase('/rest/v1/history?select=*');
-      if (hist.data) setHistory(hist.data);
-      
-      const ctrs = await fetchSupabase('/rest/v1/contracts?select=*');
-      if (ctrs.data) setContracts(ctrs.data);
-      
-      const apps = await fetchSupabase('/rest/v1/approvals?select=*');
-      if (apps.data) setApprovals(apps.data);
-      
-      const fins = await fetchSupabase('/rest/v1/financials?select=*');
-      if (fins.data) setFinancials(fins.data);
+      if (session?.user) {
+        const profile = await loadProfile(session.user);
+        if (profile) await loadData();
+      }
+      setAuthLoading(false);
     };
-    loadData();
+
+    bootstrap();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return;
+      if (event === 'SIGNED_OUT' || !session?.user) {
+        setCurrentUser(null);
+        clearData();
+        return;
+      }
+
+      if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        const profile = await loadProfile(session.user);
+        if (profile) await loadData();
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const handleLogin = async (email, password) => {
-    try {
-      const authRes = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
-        method: 'POST',
-        headers: { apikey: supabaseKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
-      });
-      const authData = await authRes.json();
-
-      if (authRes.ok && authData.user) {
-        const profRes = await fetchSupabase(`/rest/v1/profiles?id=eq.${authData.user.id}`);
-
-        if (profRes.data && profRes.data.length > 0) {
-           setCurrentUser(profRes.data[0]);
-           return true;
-        }
-      } 
-      
-      // Fallback de Segurança: Permite o login das contas de demonstração contornando bloqueios do Supabase
-      if (email === 'jonathanpinheiro.ti@outlook.com' && password === 'K1nder$202525') {
-         const adminProfile = users.find(u => u.email === email);
-         if (adminProfile) {
-            setCurrentUser(adminProfile);
-            return true;
-         }
-         
-         const signUpRes = await fetch(`${supabaseUrl}/auth/v1/signup`, {
-            method: 'POST',
-            headers: { apikey: supabaseKey, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password })
-         });
-         const signUpData = await signUpRes.json();
-         
-         if (signUpRes.ok && signUpData.user) {
-            const adminData = {
-               id: signUpData.user.id,
-               role: 'admin',
-               name: 'Jonathan Pinheiro',
-               email: email,
-               companyId: null,
-               preferences: { bgColor: 'bg-slate-200' }
-            };
-            await fetchSupabase('/rest/v1/profiles', { method: 'POST', body: JSON.stringify(adminData) });
-            setCurrentUser(adminData);
-            return true;
-         }
-      }
-
-      if (email === 'contato@alpha.com' && password === '123456') {
-         const clientProfile = users.find(u => u.email === email);
-         if (clientProfile) {
-            setCurrentUser(clientProfile);
-            return true;
-         }
-      }
-      
-      console.error("Detalhes do erro Auth:", authData);
-    } catch (err) {
-      console.error("Erro na requisição de login:", err);
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error || !data?.user) {
+      console.error('Erro de login:', error);
+      return false;
     }
-    
-    return false;
+
+    const profile = await loadProfile(data.user);
+    if (!profile) {
+      await supabase.auth.signOut({ scope: 'local' });
+      return false;
+    }
+
+    await loadData();
+    return true;
   };
 
-  const handleLogout = () => setCurrentUser(null);
+  const handleLogout = async () => {
+    await supabase.auth.signOut({ scope: 'local' });
+    setCurrentUser(null);
+    clearData();
+  };
 
-  const generateId = (prefix) => `${prefix}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+  const generateId = (prefix) => `${prefix}-${crypto.randomUUID().split('-')[0].toUpperCase()}`;
+
+  const createManagedUser = async ({ name, email, password, role, companyId = null }) => {
+    const { data, error } = await supabase.functions.invoke('admin-create-user', {
+      body: { name, email, password, role, companyId },
+    });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+    return data;
+  };
+
+  const sanitizeFileName = (name) =>
+    name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_');
+
+  const uploadPrivateFile = async (bucket, path, file) => {
+    const { data, error } = await supabase.storage.from(bucket).upload(path, file, {
+      cacheControl: '3600',
+      upsert: true,
+      contentType: file.type || undefined,
+    });
+    if (error) throw error;
+    return data.path;
+  };
+
+  const getSignedFileUrl = async (bucket, path, expiresIn = 120) => {
+    if (!path) throw new Error('Arquivo não encontrado.');
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn);
+    if (error) throw error;
+    return data.signedUrl;
+  };
 
   const contextValue = {
     currentUser, users, setUsers, companies, setCompanies,
     projects, setProjects, tickets, setTickets, contracts, setContracts,
     approvals, setApprovals, history, setHistory, financials, setFinancials,
-    handleLogout, generateId, fetchSupabase, supabaseUrl, supabaseKey,
+    handleLogout, generateId, fetchSupabase, supabaseUrl, supabaseKey, supabase,
+    createManagedUser, uploadPrivateFile, getSignedFileUrl, sanitizeFileName,
+    refreshData: loadData,
     updateUserPreferences: async (prefs) => {
-      if(!currentUser) return;
-      const updatedUser = { ...currentUser, preferences: { ...currentUser.preferences, ...prefs } };
-      
-      await fetchSupabase(`/rest/v1/profiles?id=eq.${currentUser.id}`, { 
-        method: 'PATCH', 
-        body: JSON.stringify({ preferences: updatedUser.preferences }) 
-      });
+      if (!currentUser) return;
+      const updatedPreferences = { ...(currentUser.preferences || {}), ...prefs };
+      const { error } = await supabase
+        .from('profiles')
+        .update({ preferences: updatedPreferences })
+        .eq('id', currentUser.id);
+      if (error) throw error;
 
-      const userIndex = users.findIndex(u => u.id === currentUser.id);
-      if (userIndex > -1) {
-        const newUsers = [...users];
-        newUsers[userIndex] = updatedUser;
-        setUsers(newUsers);
-      }
+      const updatedUser = { ...currentUser, preferences: updatedPreferences };
+      setUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
       setCurrentUser(updatedUser);
-    }
+    },
   };
+
+  if (authLoading) {
+    return <div className="min-h-screen flex items-center justify-center bg-slate-100 text-slate-600 font-medium">Carregando portal...</div>;
+  }
 
   return (
     <AppContext.Provider value={contextValue}>
@@ -204,6 +268,7 @@ function LoginScreen({ onLogin }) {
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setError('');
     const success = await onLogin(email, password);
     if (!success) {
       setError('Credenciais inválidas. Tente novamente.');
@@ -373,13 +438,13 @@ function AdminPortal() {
       title: 'Operacional',
       items: [
         { id: 'clients', label: 'Clientes', icon: Users },
-        { id: 'projects', label: 'Projetos', icon: FolderKanban }
+        { id: 'projects', label: 'Projetos', icon: FolderKanban },
+        { id: 'tickets', label: 'Chamados', icon: Ticket }
       ]
     },
     {
       title: 'Gestão',
       items: [
-        { id: 'integrations', label: 'Integrações', icon: LinkIcon },
         { id: 'financial', label: 'Financeiro', icon: DollarSign },
         { id: 'register-admin', label: 'Cadastrar Admin', icon: ShieldAlert },
         { id: 'register-company', label: 'Cadastrar Empresa', icon: Building2 }
@@ -392,7 +457,7 @@ function AdminPortal() {
       case 'dashboard': return <AdminDashboard />;
       case 'clients': return <AdminClients />;
       case 'projects': return <AdminProjects />;
-      case 'integrations': return <AdminPlaceholder title="Integrações" desc="Configurações de APIs e integrações de terceiros." />;
+      case 'tickets': return <AdminTickets />;
       case 'financial': return <AdminFinancial />;
       case 'register-admin': return <AdminRegisterAdmin />;
       case 'register-company': return <AdminRegisterCompany />;
@@ -699,89 +764,77 @@ function AdminClients() {
 }
 
 function AdminRegisterCompany() {
-  const { companies, setCompanies, generateId, users, setUsers, fetchSupabase, supabaseUrl, supabaseKey } = useContext(AppContext);
+  const { companies, setCompanies, users, setUsers, createManagedUser, fetchSupabase, generateId } = useContext(AppContext);
   const [name, setName] = useState('');
   const [cnpj, setCnpj] = useState('');
+  const [clientName, setClientName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [clientPassword, setClientPassword] = useState('');
   const [success, setSuccess] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
+    setLoading(true); setSuccess(''); setErrorMsg('');
     const newCompanyId = generateId('CMP');
-    const newCompany = { id: newCompanyId, name, cnpj };
-    
-    await fetchSupabase('/rest/v1/companies', { method: 'POST', body: JSON.stringify(newCompany) });
-    setCompanies([...companies, newCompany]);
+    const newCompany = { id: newCompanyId, name: name.trim(), cnpj: cnpj.trim() || null };
 
-    if (clientEmail && clientPassword) {
-      const authRes = await fetch(`${supabaseUrl}/auth/v1/signup`, {
-         method: 'POST',
-         headers: { apikey: supabaseKey, 'Content-Type': 'application/json' },
-         body: JSON.stringify({ email: clientEmail, password: clientPassword })
-      });
-      const authData = await authRes.json();
+    try {
+      const companyRes = await fetchSupabase('/rest/v1/companies', { method: 'POST', body: JSON.stringify(newCompany) });
+      if (companyRes.error) throw new Error(companyRes.error.message || JSON.stringify(companyRes.error));
 
-      if (authRes.ok && authData.user) {
-        const newProfile = {
-          id: authData.user.id,
+      let createdProfile = null;
+      if (clientEmail && clientPassword) {
+        const result = await createManagedUser({
+          name: clientName.trim() || `Contato - ${name.trim()}`,
+          email: clientEmail.trim().toLowerCase(),
+          password: clientPassword,
           role: 'client',
           companyId: newCompanyId,
-          name: `Contato - ${name}`,
-          email: clientEmail,
-          preferences: { bgColor: 'bg-slate-50' }
-        };
-        await fetchSupabase('/rest/v1/profiles', { method: 'POST', body: JSON.stringify(newProfile) });
-        setUsers([...users, newProfile]);
+        });
+        createdProfile = result.profile;
       }
-    }
 
-    setSuccess(`Empresa ${name} cadastrada com sucesso! ID: ${newCompanyId}`);
-    setName(''); setCnpj(''); setClientEmail(''); setClientPassword('');
-    setLoading(false);
-    setTimeout(() => setSuccess(''), 5000);
+      setCompanies(prev => [...prev, newCompany]);
+      if (createdProfile) setUsers(prev => [...prev, createdProfile]);
+      setSuccess(`Empresa ${name} cadastrada com sucesso.${createdProfile ? ' Acesso do cliente criado.' : ''}`);
+      setName(''); setCnpj(''); setClientName(''); setClientEmail(''); setClientPassword('');
+    } catch (err) {
+      // Se a criação do usuário falhar após criar a empresa, remove a empresa vazia.
+      await fetchSupabase(`/rest/v1/companies?id=eq.${newCompanyId}`, { method: 'DELETE' });
+      setErrorMsg(err.message || 'Não foi possível cadastrar a empresa.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div className="max-w-2xl mx-auto bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
-      <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-        <Building2 className="text-blue-600"/> Cadastrar Nova Empresa
-      </h2>
-      
+      <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2"><Building2 className="text-blue-600"/> Cadastrar Nova Empresa</h2>
       {success && <div className="mb-6 p-4 bg-green-50 text-green-700 rounded-lg border border-green-200">{success}</div>}
+      {errorMsg && <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-lg border border-red-200">{errorMsg}</div>}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="space-y-4">
           <h3 className="font-semibold text-slate-700 border-b pb-2">Dados da Empresa</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Nome / Razão Social</label>
-              <input type="text" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500" value={name} onChange={e => setName(e.target.value)} required disabled={loading} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">CNPJ</label>
-              <input type="text" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500" value={cnpj} onChange={e => setCnpj(e.target.value)} disabled={loading} />
-            </div>
+            <div><label className="block text-sm font-medium text-slate-700 mb-1">Nome / Razão Social</label><input type="text" className="w-full p-2 border rounded" value={name} onChange={e => setName(e.target.value)} required disabled={loading}/></div>
+            <div><label className="block text-sm font-medium text-slate-700 mb-1">CNPJ</label><input type="text" className="w-full p-2 border rounded" value={cnpj} onChange={e => setCnpj(e.target.value)} disabled={loading}/></div>
           </div>
         </div>
 
         <div className="space-y-4">
-          <h3 className="font-semibold text-slate-700 border-b pb-2">Acesso do Cliente (Opcional)</h3>
+          <h3 className="font-semibold text-slate-700 border-b pb-2">Acesso do Cliente (opcional)</h3>
+          <div><label className="block text-sm font-medium text-slate-700 mb-1">Nome do responsável</label><input type="text" className="w-full p-2 border rounded" value={clientName} onChange={e => setClientName(e.target.value)} disabled={loading}/></div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">E-mail de Acesso</label>
-              <input type="email" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500" value={clientEmail} onChange={e => setClientEmail(e.target.value)} disabled={loading} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Senha Padrão</label>
-              <input type="text" className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500" value={clientPassword} onChange={e => setClientPassword(e.target.value)} disabled={loading} />
-            </div>
+            <div><label className="block text-sm font-medium text-slate-700 mb-1">E-mail de acesso</label><input type="email" className="w-full p-2 border rounded" value={clientEmail} onChange={e => setClientEmail(e.target.value)} disabled={loading}/></div>
+            <div><label className="block text-sm font-medium text-slate-700 mb-1">Senha temporária</label><input type="password" minLength={8} className="w-full p-2 border rounded" value={clientPassword} onChange={e => setClientPassword(e.target.value)} disabled={loading}/></div>
           </div>
+          <p className="text-xs text-slate-500">Use pelo menos 8 caracteres. O usuário é criado pelo backend seguro, sem expor a service role no navegador.</p>
         </div>
 
-        <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 font-medium transition disabled:opacity-70">
+        <button type="submit" disabled={loading || (!!clientEmail !== !!clientPassword)} className="w-full bg-blue-600 text-white p-3 rounded-lg hover:bg-blue-700 font-medium disabled:opacity-60">
           {loading ? 'Cadastrando...' : 'Cadastrar Empresa'}
         </button>
       </form>
@@ -790,77 +843,48 @@ function AdminRegisterCompany() {
 }
 
 function AdminRegisterAdmin() {
-  const { users, setUsers, fetchSupabase, supabaseUrl, supabaseKey } = useContext(AppContext);
+  const { setUsers, createManagedUser } = useContext(AppContext);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [success, setSuccess] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    
-    const authRes = await fetch(`${supabaseUrl}/auth/v1/signup`, {
-       method: 'POST',
-       headers: { apikey: supabaseKey, 'Content-Type': 'application/json' },
-       body: JSON.stringify({ email, password })
-    });
-    const authData = await authRes.json();
-
-    if (authRes.ok && authData.user) {
-      const newProfile = {
-        id: authData.user.id,
-        role: 'admin',
-        name, 
-        email,
-        companyId: null,
-        preferences: { bgColor: 'bg-slate-200' }
-      };
-      
-      await fetchSupabase('/rest/v1/profiles', { method: 'POST', body: JSON.stringify(newProfile) });
-      setUsers([...users, newProfile]);
-      setSuccess(`Administrador ${name} criado com sucesso no banco de dados.`);
+    setLoading(true); setSuccess(''); setErrorMsg('');
+    try {
+      const result = await createManagedUser({
+        name: name.trim(), email: email.trim().toLowerCase(), password, role: 'admin', companyId: null,
+      });
+      if (result.profile) setUsers(prev => [...prev, result.profile]);
+      setSuccess(`Administrador ${name} criado com sucesso.`);
       setName(''); setEmail(''); setPassword('');
-    } else {
-      setSuccess('Erro ao criar Auth no Supabase: ' + (authData.msg || 'Erro desconhecido'));
+    } catch (err) {
+      setErrorMsg(err.message || 'Erro ao criar administrador.');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
-    setTimeout(() => setSuccess(''), 3000);
   };
 
   return (
     <div className="max-w-xl mx-auto bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
-      <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-        <ShieldAlert className="text-blue-600"/> Cadastrar Novo Administrador LS
-      </h2>
-      
+      <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2"><ShieldAlert className="text-blue-600"/> Cadastrar Novo Administrador LS</h2>
       {success && <div className="mb-6 p-4 bg-green-50 text-green-700 rounded-lg">{success}</div>}
-
+      {errorMsg && <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-lg">{errorMsg}</div>}
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Nome Completo</label>
-          <input type="text" className="w-full p-2 border rounded" value={name} onChange={e => setName(e.target.value)} required disabled={loading} />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">E-mail</label>
-          <input type="email" className="w-full p-2 border rounded" value={email} onChange={e => setEmail(e.target.value)} required disabled={loading} />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Senha</label>
-          <input type="text" className="w-full p-2 border rounded" value={password} onChange={e => setPassword(e.target.value)} required disabled={loading} />
-        </div>
-        <button type="submit" disabled={loading} className="w-full bg-slate-800 text-white p-3 rounded-lg hover:bg-slate-900 transition disabled:opacity-70">
-          {loading ? 'Gravando...' : 'Cadastrar Administrador'}
-        </button>
+        <div><label className="block text-sm font-medium text-slate-700 mb-1">Nome Completo</label><input type="text" className="w-full p-2 border rounded" value={name} onChange={e => setName(e.target.value)} required disabled={loading}/></div>
+        <div><label className="block text-sm font-medium text-slate-700 mb-1">E-mail</label><input type="email" className="w-full p-2 border rounded" value={email} onChange={e => setEmail(e.target.value)} required disabled={loading}/></div>
+        <div><label className="block text-sm font-medium text-slate-700 mb-1">Senha temporária</label><input type="password" minLength={8} className="w-full p-2 border rounded" value={password} onChange={e => setPassword(e.target.value)} required disabled={loading}/></div>
+        <button type="submit" disabled={loading} className="w-full bg-slate-800 text-white p-3 rounded-lg hover:bg-slate-900 disabled:opacity-60">{loading ? 'Gravando...' : 'Cadastrar Administrador'}</button>
       </form>
     </div>
   );
 }
 
 function AdminProjects() {
-  const { projects, setProjects, companies, users, generateId, history, setHistory, fetchSupabase } = useContext(AppContext);
+  const { projects, setProjects, companies, users, generateId, history, setHistory, approvals, setApprovals, fetchSupabase, uploadPrivateFile, getSignedFileUrl, sanitizeFileName } = useContext(AppContext);
   const [isAdding, setIsAdding] = useState(false);
   const [loading, setLoading] = useState(false);
   const [viewingProject, setViewingProject] = useState(null);
@@ -873,10 +897,12 @@ function AdminProjects() {
   const [editObservation, setEditObservation] = useState('');
   const [editAssignedUser, setEditAssignedUser] = useState('');
   const [editContractFile, setEditContractFile] = useState('');
+  const [editContractObject, setEditContractObject] = useState(null);
   const [editStatus, setEditStatus] = useState('active');
   
   // State para nova observação (histórico)
   const [newObservation, setNewObservation] = useState('');
+  const [newApprovalTitle, setNewApprovalTitle] = useState('');
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -912,6 +938,7 @@ function AdminProjects() {
     setEditObservation(proj.observation || '');
     setEditAssignedUser(proj.assignedUserId || '');
     setEditContractFile(proj.contractFileName || '');
+    setEditContractObject(null);
     setEditStatus(proj.status || 'active');
     setNewObservation('');
     setIsAdding(false);
@@ -922,15 +949,23 @@ function AdminProjects() {
     setLoading(true);
     const updates = {
       observation: editObservation,
-      assignedUserId: editAssignedUser,
-      contractFileName: editContractFile,
+      assignedUserId: editAssignedUser || null,
       status: editStatus
     };
 
-    await fetchSupabase(`/rest/v1/projects?id=eq.${viewingProject.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(updates)
-    });
+    try {
+      if (editContractObject) {
+        const safeName = sanitizeFileName(editContractObject.name);
+        const storagePath = `${viewingProject.companyId}/${viewingProject.id}/${Date.now()}-${safeName}`;
+        const uploadedPath = await uploadPrivateFile('contracts', storagePath, editContractObject);
+        updates.contractFileName = editContractObject.name;
+        updates.contractStoragePath = uploadedPath;
+      }
+
+      const updateRes = await fetchSupabase(`/rest/v1/projects?id=eq.${viewingProject.id}`, {
+        method: 'PATCH', body: JSON.stringify(updates)
+      });
+      if (updateRes.error) throw new Error(updateRes.error.message || 'Falha ao atualizar projeto.');
 
     // Registra a atividade geral no histórico do projeto
     const histId = generateId('HST');
@@ -946,7 +981,12 @@ function AdminProjects() {
     const newProjects = projects.map(p => p.id === viewingProject.id ? { ...p, ...updates } : p);
     setProjects(newProjects);
     setViewingProject({ ...viewingProject, ...updates });
-    setLoading(false);
+    setEditContractObject(null);
+    } catch (err) {
+      alert(err.message || 'Erro ao atualizar projeto.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDeleteProject = async () => {
@@ -984,6 +1024,28 @@ function AdminProjects() {
 
     setNewObservation('');
     setLoading(false);
+  };
+
+  const handleAddApproval = async (e) => {
+    e.preventDefault();
+    if (!newApprovalTitle.trim()) return;
+    setLoading(true);
+    try {
+      const item = {
+        id: generateId('APR'),
+        projectId: viewingProject.id,
+        title: newApprovalTitle.trim(),
+        approved: false,
+      };
+      const res = await fetchSupabase('/rest/v1/approvals', { method: 'POST', body: JSON.stringify(item) });
+      if (res.error) throw new Error(res.error.message || 'Falha ao criar aprovação.');
+      setApprovals(prev => [item, ...prev]);
+      setNewApprovalTitle('');
+    } catch (err) {
+      alert(err.message || 'Erro ao solicitar aprovação.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Visão Detalhada (Edição do Projeto)
@@ -1056,6 +1118,7 @@ function AdminProjects() {
                         onChange={e => {
                           if(e.target.files[0]) {
                             setEditContractFile(e.target.files[0].name);
+                            setEditContractObject(e.target.files[0]);
                           }
                         }}
                         disabled={loading}
@@ -1122,7 +1185,7 @@ function AdminProjects() {
                 </div>
                 <div>
                   <span className="text-slate-400 block mb-1 text-xs uppercase tracking-wider">Contrato Vinculado</span>
-                  <span className="font-medium flex items-center gap-2">{viewingProject.contractFileName ? <><FileText size={14} className="text-blue-400"/> {viewingProject.contractFileName}</> : 'Nenhum arquivo anexado'}</span>
+                  <span className="font-medium flex items-center gap-2 flex-wrap">{viewingProject.contractFileName ? <><FileText size={14} className="text-blue-400"/> {viewingProject.contractFileName}{viewingProject.contractStoragePath && <button type="button" className="text-blue-400 hover:underline text-xs" onClick={async()=>{ try { const url = await getSignedFileUrl('contracts', viewingProject.contractStoragePath); window.open(url, '_blank', 'noopener,noreferrer'); } catch(err){ alert(err.message); } }}>Abrir</button>}</> : 'Nenhum arquivo anexado'}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 block mb-1 text-xs uppercase tracking-wider">Última Observação</span>
@@ -1243,6 +1306,56 @@ function AdminProjects() {
   );
 }
 
+function AdminTickets() {
+  const { tickets, setTickets, companies, users, fetchSupabase } = useContext(AppContext);
+  const [filter, setFilter] = useState('all');
+  const [loadingId, setLoadingId] = useState(null);
+
+  const updateTicket = async (ticket, updates) => {
+    setLoadingId(ticket.id);
+    try {
+      const payload = { ...updates };
+      if (updates.status === 'closed') payload.closed_at = new Date().toISOString();
+      const res = await fetchSupabase(`/rest/v1/tickets?id=eq.${ticket.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+      if (res.error) throw new Error(res.error.message || 'Falha ao atualizar chamado.');
+      setTickets(prev => prev.map(t => t.id === ticket.id ? { ...t, ...payload } : t));
+    } catch (err) {
+      alert(err.message || 'Erro ao atualizar chamado.');
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  const visible = tickets
+    .filter(t => filter === 'all' || t.status === filter)
+    .sort((a,b) => new Date(b.date) - new Date(a.date));
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between gap-4">
+        <div><h1 className="text-2xl font-bold text-slate-800">Chamados de Suporte</h1><p className="text-slate-500">Gerencie solicitações abertas pelos clientes.</p></div>
+        <select className="p-2 border rounded-lg bg-white" value={filter} onChange={e=>setFilter(e.target.value)}>
+          <option value="all">Todos</option><option value="open">Abertos</option><option value="in_progress">Em atendimento</option><option value="waiting_client">Aguardando cliente</option><option value="closed">Fechados</option>
+        </select>
+      </div>
+      <div className="space-y-4">
+        {visible.length===0 ? <div className="bg-white rounded-xl p-8 border"><EmptyState message="Nenhum chamado neste filtro."/></div> : visible.map(t=>{
+          const company=companies.find(c=>c.id===t.companyId);
+          return <div key={t.id} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+            <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+              <div className="flex-1"><div className="flex items-center gap-2"><h3 className="font-bold text-slate-800">{t.title}</h3><span className="text-xs text-slate-400 font-mono">{t.id}</span></div><p className="text-xs text-blue-600 font-medium mt-1">{company?.name || t.companyId}</p><p className="text-sm text-slate-600 mt-3 whitespace-pre-wrap">{t.description}</p><p className="text-xs text-slate-400 mt-3">{new Date(t.date).toLocaleString()}</p></div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-[320px]">
+                <select disabled={loadingId===t.id} className="p-2 border rounded-lg text-sm" value={t.status} onChange={e=>updateTicket(t,{status:e.target.value})}><option value="open">Aberto</option><option value="in_progress">Em atendimento</option><option value="waiting_client">Aguardando cliente</option><option value="closed">Fechado</option></select>
+                <select disabled={loadingId===t.id} className="p-2 border rounded-lg text-sm" value={t.assignedUserId || ''} onChange={e=>updateTicket(t,{assignedUserId:e.target.value || null})}><option value="">Sem responsável</option>{users.filter(u=>u.role==='admin').map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select>
+              </div>
+            </div>
+          </div>
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AdminPlaceholder({ title, desc }) {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center">
@@ -1257,7 +1370,7 @@ function AdminPlaceholder({ title, desc }) {
 }
 
 function AdminFinancial() {
-  const { companies, setCompanies, financials, setFinancials, generateId, fetchSupabase } = useContext(AppContext);
+  const { companies, setCompanies, financials, setFinancials, generateId, fetchSupabase, getSignedFileUrl } = useContext(AppContext);
   const [isAdding, setIsAdding] = useState(false);
   const [loading, setLoading] = useState(false);
   const [expandedCompanyId, setExpandedCompanyId] = useState(null);
@@ -1274,13 +1387,21 @@ function AdminFinancial() {
   const [dueDate, setDueDate] = useState('');
   const [installmentsCount, setInstallmentsCount] = useState(1);
 
+  const normalizeMoney = (value) => {
+    const raw = String(value).trim();
+    const normalized = raw.includes(',') ? raw.replace(/\./g, '').replace(',', '.') : raw;
+    return Number(normalized);
+  };
+
   const handleAddOrEdit = async (e) => {
     e.preventDefault();
     setLoading(true);
+    const numericAmount = normalizeMoney(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount < 0) { setLoading(false); return alert('Informe um valor válido.'); }
     
     if (editingId) {
       // Edit existing
-      const updates = { companyId, description, amount, dueDate };
+      const updates = { companyId, description, amount: numericAmount, dueDate };
       await fetchSupabase(`/rest/v1/financials?id=eq.${editingId}`, { method: 'PATCH', body: JSON.stringify(updates) });
       setFinancials(financials.map(f => f.id === editingId ? { ...f, ...updates } : f));
     } else {
@@ -1306,7 +1427,7 @@ function AdminFinancial() {
           id: generateId('FIN'),
           companyId,
           description: formattedDesc,
-          amount,
+          amount: numericAmount,
           dueDate: formattedDate,
           status: 'pending',
           receiptUrl: null
@@ -1362,15 +1483,18 @@ function AdminFinancial() {
     setLoading(false);
   };
 
-  const handleViewReceipt = (e, url) => {
+  const handleViewReceipt = async (e, path) => {
     e.stopPropagation();
-    if (url.startsWith('data:')) {
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'comprovante';
-      a.click();
-    } else {
-      window.open(url, '_blank');
+    try {
+      // Compatibilidade temporária com comprovantes antigos já salvos como data URL.
+      if (path?.startsWith('data:') || path?.startsWith('http')) {
+        window.open(path, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      const signedUrl = await getSignedFileUrl('receipts', path);
+      window.open(signedUrl, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      alert(err.message || 'Não foi possível abrir o comprovante.');
     }
   };
 
@@ -1739,7 +1863,7 @@ function ClientProfile() {
 }
 
 function ClientProjects() {
-  const { currentUser, projects, setProjects, contracts, approvals, setApprovals, history, users, fetchSupabase } = useContext(AppContext);
+  const { currentUser, projects, setProjects, contracts, approvals, setApprovals, history, users, fetchSupabase, getSignedFileUrl } = useContext(AppContext);
   const myProjects = projects.filter(p => p.companyId === currentUser.companyId);
   const [activeTab, setActiveTab] = useState('andamento');
   const [selectedProjectId, setSelectedProjectId] = useState(myProjects.length > 0 ? myProjects[0].id : null);
@@ -1761,20 +1885,19 @@ function ClientProjects() {
 
   const handleApprove = async (approvalId) => {
     const approval = approvals.find(a => a.id === approvalId);
-    if(!approval) return;
-    await fetchSupabase(`/rest/v1/approvals?id=eq.${approvalId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ approved: !approval.approved })
-    });
-    setApprovals(approvals.map(a => a.id === approvalId ? { ...a, approved: !a.approved } : a));
+    if (!approval || approval.approved) return;
+    const updates = { approved: true, approvedAt: new Date().toISOString(), approvedBy: currentUser.id };
+    const res = await fetchSupabase(`/rest/v1/approvals?id=eq.${approvalId}`, { method: 'PATCH', body: JSON.stringify(updates) });
+    if (res.error) return alert(res.error.message || 'Não foi possível registrar a aprovação.');
+    setApprovals(prev => prev.map(a => a.id === approvalId ? { ...a, ...updates } : a));
   };
 
   const handleApproveProject = async () => {
     await fetchSupabase(`/rest/v1/projects?id=eq.${selectedProject.id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ clientApproved: true })
+      body: JSON.stringify({ clientApproved: true, clientApprovedAt: new Date().toISOString(), clientApprovedBy: currentUser.id })
     });
-    const newProjects = projects.map(p => p.id === selectedProject.id ? { ...p, clientApproved: true } : p);
+    const newProjects = projects.map(p => p.id === selectedProject.id ? { ...p, clientApproved: true, clientApprovedAt: new Date().toISOString(), clientApprovedBy: currentUser.id } : p);
     setProjects(newProjects);
   };
 
@@ -1867,18 +1990,19 @@ function ClientProjects() {
                          <p className="text-xs text-slate-500">{selectedProject.contractFileName}</p>
                        </div>
                      </div>
-                     <button 
-                       onClick={() => {
-                         // Gera um PDF demonstrativo estruturado em Base64 para download funcional do lado do cliente
-                         const pdfData = "JVBERi0xLjcKCjEgMCBvYmogICUgZW50cnkgcG9pbnQKPDwKICAvVHlwZSAvQ2F0YWxvZwogIC9QYWdlcyAyIDAgUgo+PgplbmRvYmoKCjIgMCBvYmoKPDwKICAvVHlwZSAvUGFnZXMKICAvTWVkaWFCb3ggWyAwIDAgMjAwIDIwMCBdCiAgL0NvdW50IDEKICAvS2lkcyBbIDMgMCBSIF0KPj4KZW5kb2JqCgozIDAgb2JqCjw8CiAgL1R5cGUgL1BhZ2UKICAvUGFyZW50IDIgMCBSCiAgL1Jlc291cmNlcyA8PAogICAgL0ZvbnQgPDwKICAgICAgL0YxIDQgMCBSCj4+Cj4+CiAgL0NvbnRlbnRzIDUgMCBSCj4+CmVuZG9iagoKNCAwIG9iago8PAogIC9UeXBlIC9Gb250CiAgL1N1YnR5cGUgL1R5cGUxCiAgL0Jhc2VGb250IC9UaW1lcy1Sb21hbgo+PgplbmRvYmoKCjUgMCBvYmoKPDwgL0xlbmd0aCA0NCA+PgpzdHJlYW0KQlQKL0YxIDE4IFRmCjAgMCBUZAooQ29udHJhdG8pIFRqCkVUCmVuZHN0cmVhbQplbmRvYmoKCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDEwIDEwMDAwIG4gCjAwMDAwMDAwNjggMTAwMDAgbiAKMDAwMDAwMDE2NyAxMDAwMCBuIAowMDAwMDAwMjk2IDEwMDAwIG4gCjAwMDAwMDAzODQgMTAwMDAgbiAKdHJhaWxlcgo8PAogIC9TaXplIDYKICAvUm9vdCAxIDAgUgo+PgpzdGFydHhyZWYKNDY3CiUlRU9GCg==";
-                         const a = document.createElement('a');
-                         a.href = `data:application/pdf;base64,${pdfData}`;
-                         a.download = selectedProject.contractFileName.endsWith('.pdf') ? selectedProject.contractFileName : `${selectedProject.contractFileName}.pdf`;
-                         a.click();
+                     <button
+                       onClick={async () => {
+                         try {
+                           if (!selectedProject.contractStoragePath) return alert('Arquivo do contrato ainda não foi enviado.');
+                           const url = await getSignedFileUrl('contracts', selectedProject.contractStoragePath);
+                           window.open(url, '_blank', 'noopener,noreferrer');
+                         } catch (err) {
+                           alert(err.message || 'Não foi possível abrir o contrato.');
+                         }
                        }}
                        className="text-blue-600 text-sm font-bold bg-blue-50 px-4 py-2 rounded-lg hover:bg-blue-100 transition-colors"
                      >
-                       Baixar PDF
+                       Abrir PDF
                      </button>
                    </div>
                  )}
@@ -2018,7 +2142,7 @@ function ClientSupport() {
 }
 
 function ClientFinancial() {
-  const { currentUser, financials, setFinancials, fetchSupabase, companies, generateId, supabaseUrl, supabaseKey } = useContext(AppContext);
+  const { currentUser, financials, setFinancials, fetchSupabase, companies, uploadPrivateFile, sanitizeFileName } = useContext(AppContext);
   const myFinancials = financials.filter(f => f.companyId === currentUser.companyId);
   const [loading, setLoading] = useState(false);
   const myCompany = companies.find(c => c.id === currentUser.companyId);
@@ -2029,27 +2153,23 @@ function ClientFinancial() {
   const [selectedFile, setSelectedFile] = useState(null);
 
   const handleUploadReceipt = async (finId, file) => {
-    if(!file) return;
+    if (!file) return;
     setLoading(true);
-    
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = async () => {
-      const base64Url = reader.result;
-      const updates = { receiptUrl: base64Url, status: 'in_review' };
-      
-      await fetchSupabase(`/rest/v1/financials?id=eq.${finId}`, { method: 'PATCH', body: JSON.stringify(updates) });
-      setFinancials(financials.map(f => f.id === finId ? { ...f, ...updates } : f));
-      
+    try {
+      const safeName = sanitizeFileName(file.name);
+      const storagePath = `${currentUser.companyId}/${finId}/${Date.now()}-${safeName}`;
+      const uploadedPath = await uploadPrivateFile('receipts', storagePath, file);
+      const updates = { receiptUrl: uploadedPath, status: 'in_review' };
+      const res = await fetchSupabase(`/rest/v1/financials?id=eq.${finId}`, { method: 'PATCH', body: JSON.stringify(updates) });
+      if (res.error) throw new Error(res.error.message || 'Falha ao registrar comprovante.');
+      setFinancials(prev => prev.map(f => f.id === finId ? { ...f, ...updates } : f));
       setSelectedPayId('');
       setSelectedFile(null);
+    } catch (err) {
+      alert(err.message || 'Erro ao enviar comprovante.');
+    } finally {
       setLoading(false);
-    };
-    
-    reader.onerror = () => {
-      alert("Erro ao processar a leitura do arquivo.");
-      setLoading(false);
-    };
+    }
   };
 
   return (
