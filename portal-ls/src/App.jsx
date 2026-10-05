@@ -76,11 +76,12 @@ export default function App() {
   const [tickets, setTickets] = useState([]);
   const [history, setHistory] = useState([]);
   const [financials, setFinancials] = useState([]);
+  const [financialSettings, setFinancialSettings] = useState(null);
   const [approvals, setApprovals] = useState([]);
 
   const clearData = () => {
     setCompanies([]); setUsers([]); setProjects([]); setTickets([]);
-    setHistory([]); setFinancials([]); setApprovals([]);
+    setHistory([]); setFinancials([]); setFinancialSettings(null); setApprovals([]);
   };
 
   const loadData = async () => {
@@ -95,7 +96,12 @@ export default function App() {
       else console.error(`Erro ao carregar ${table}:`, result.error);
       return result;
     }));
-    return results.every(r => !r.error);
+
+    const settingsRes = await fetchSupabase('/rest/v1/ls_financial_settings?id=eq.default&select=*');
+    if (!settingsRes.error) setFinancialSettings(settingsRes.data?.[0] || null);
+    else console.error('Erro ao carregar configurações financeiras:', settingsRes.error);
+
+    return results.every(r => !r.error) && !settingsRes.error;
   };
 
   const loadProfile = async (authUser) => {
@@ -162,7 +168,7 @@ export default function App() {
   const ctx = {
     currentUser, companies, setCompanies, users, setUsers, projects, setProjects,
     tickets, setTickets, history, setHistory, financials, setFinancials,
-    approvals, setApprovals, fetchSupabase, createManagedUser, generateId,
+    financialSettings, setFinancialSettings, approvals, setApprovals, fetchSupabase, createManagedUser, generateId,
     refreshData: loadData, logout, supabase,
   };
 
@@ -300,13 +306,14 @@ function AdminPortal() {
   const menu = [
     {id:'dashboard',label:'Visão geral',icon:LayoutDashboard}, {id:'clients',label:'Clientes',icon:Users},
     {id:'projects',label:'Desenvolvimentos',icon:FolderKanban}, {id:'financial',label:'Financeiro',icon:WalletCards},
+    {id:'financial-settings',label:'Config. financeiro',icon:Settings},
     {id:'tickets',label:'Suporte',icon:Ticket}, {id:'register-company',label:'Cadastrar cliente',icon:Building2},
     {id:'register-admin',label:'Cadastrar admin',icon:ShieldCheck},
   ];
   const titles = Object.fromEntries(menu.map(x=>[x.id,x.label]));
   const content = {
     dashboard:<AdminDashboard/>, clients:<AdminClients/>, projects:<AdminProjects/>, financial:<AdminFinancial/>,
-    tickets:<AdminTickets/>, 'register-company':<AdminRegisterCompany onDone={()=>setView('clients')}/>,
+    'financial-settings':<AdminFinancialSettings/>, tickets:<AdminTickets/>, 'register-company':<AdminRegisterCompany onDone={()=>setView('clients')}/>,
     'register-admin':<AdminRegisterAdmin/>,
   }[view];
   return <PortalShell menu={menu} currentView={view} setView={setView} title={titles[view]}>{content}</PortalShell>;
@@ -578,14 +585,181 @@ function AdminProjects() {
 }
 
 function AdminFinancial() {
-  const {financials,setFinancials,companies,fetchSupabase,generateId}=useContext(AppContext);
-  const [form,setForm]=useState({companyId:'',description:'',amount:'',dueDate:'',installments:1}); const [loading,setLoading]=useState(false); const [filter,setFilter]=useState('all');
-  const create=async e=>{e.preventDefault();setLoading(true);const total=Math.max(1,Number(form.installments||1));const base=new Date(`${form.dueDate}T12:00:00`);const created=[];for(let i=0;i<total;i++){const d=new Date(base);d.setMonth(d.getMonth()+i);const item={id:generateId('FIN'),companyId:form.companyId,description:total>1?`${form.description} ${i+1}/${total}`:form.description,amount:Number(String(form.amount).replace(',','.')),dueDate:d.toISOString().slice(0,10),status:'pending',paymentUrl:null,asaasPaymentLinkId:null,paidAt:null};const r=await fetchSupabase('/rest/v1/financials',{method:'POST',body:JSON.stringify(item)});if(r.error){setLoading(false);return alert(r.error.message||'Erro ao criar cobrança');}created.push(item);}setFinancials(x=>[...created,...x]);setForm({companyId:'',description:'',amount:'',dueDate:'',installments:1});setLoading(false);};
-  const createLink=async fin=>{setLoading(true);try{const {data,error}=await supabase.functions.invoke('create-asaas-payment-link',{body:{financialId:fin.id,successUrl:`${window.location.origin}?payment=success`}});if(error)throw error;if(data?.error)throw new Error(data.error);setFinancials(x=>x.map(f=>f.id===fin.id?{...f,paymentUrl:data.url,asaasPaymentLinkId:data.id}:f));window.open(data.url,'_blank','noopener,noreferrer');}catch(err){alert(err.message||'Não foi possível criar o link Asaas.');}finally{setLoading(false)}};
-  const markPaid=async id=>{const updates={status:'paid',paidAt:new Date().toISOString()};const r=await fetchSupabase(`/rest/v1/financials?id=eq.${id}`,{method:'PATCH',body:JSON.stringify(updates)});if(!r.error)setFinancials(x=>x.map(f=>f.id===id?{...f,...updates}:f));};
-  const rows=financials.filter(f=>filter==='all'||f.status===filter).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
-  const pending=financials.filter(f=>f.status==='pending').reduce((s,f)=>s+Number(f.amount||0),0);const paid=financials.filter(f=>f.status==='paid').reduce((s,f)=>s+Number(f.amount||0),0);
-  return <div className="space-y-7"><div><h2 className="page-title">Financeiro</h2><p className="page-subtitle">Crie cobranças e receba pelo Asaas diretamente no portal.</p></div><div className="grid sm:grid-cols-3 gap-4"><Metric icon={WalletCards} label="A receber" value={money(pending)}/><Metric icon={CheckCircle2} label="Recebido" value={money(paid)}/><Metric icon={Receipt} label="Cobranças" value={financials.length}/></div><form onSubmit={create} className="card p-5 grid md:grid-cols-5 gap-4"><Field label="Cliente"><select className="input" value={form.companyId} onChange={e=>setForm({...form,companyId:e.target.value})} required><option value="">Selecione...</option>{companies.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></Field><Field label="Descrição"><input className="input" value={form.description} onChange={e=>setForm({...form,description:e.target.value})} required/></Field><Field label="Valor"><input className="input" inputMode="decimal" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} required/></Field><Field label="1º vencimento"><input className="input" type="date" value={form.dueDate} onChange={e=>setForm({...form,dueDate:e.target.value})} required/></Field><Field label="Parcelas"><input className="input" type="number" min="1" max="36" value={form.installments} onChange={e=>setForm({...form,installments:e.target.value})}/></Field><div className="md:col-span-5"><button className="btn-primary" disabled={loading}>Gerar cobrança</button></div></form><div className="flex gap-2 flex-wrap">{['all','pending','paid'].map(x=><button key={x} onClick={()=>setFilter(x)} className={`px-4 py-2 rounded-xl text-sm font-normal ${filter===x?'bg-slate-950 text-white':'bg-white border border-slate-200'}`}>{x==='all'?'Todas':x==='pending'?'Pendentes':'Pagas'}</button>)}</div><div className="space-y-3">{rows.map(f=><div key={f.id} className="card p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center gap-4"><div className="flex-1"><div className="font-normal">{companies.find(c=>c.id===f.companyId)?.name||'Cliente'}</div><div className="text-sm text-slate-500 mt-1">{f.description} • Vence {dateBR(f.dueDate)}</div></div><div className="font-normal text-lg">{money(f.amount)}</div><PaymentStatus status={f.status}/><div className="flex flex-wrap gap-2"><button onClick={()=>createLink(f)} disabled={loading||f.status==='paid'} className="btn-secondary">{f.paymentUrl?'Abrir pagamento':'Gerar link Asaas'}</button>{f.status!=='paid'&&<button onClick={()=>markPaid(f.id)} className="btn-dark">Marcar pago</button>}</div></div>)}</div></div>;
+  const {financials,setFinancials,companies,fetchSupabase,generateId,financialSettings}=useContext(AppContext);
+  const [form,setForm]=useState({companyId:'',description:'',amount:'',dueDate:'',installments:1,customerPhone:'',paymentNotes:''});
+  const [loading,setLoading]=useState(false);
+  const [filter,setFilter]=useState('all');
+
+  const normalizeMoney=value=>{
+    const raw=String(value||'').trim();
+    const normalized=raw.includes(',')?raw.replace(/\./g,'').replace(',','.'):raw;
+    return Number(normalized);
+  };
+
+  const create=async e=>{
+    e.preventDefault();
+    const numericAmount=normalizeMoney(form.amount);
+    if(!Number.isFinite(numericAmount)||numericAmount<=0)return alert('Informe um valor válido.');
+    if(!form.customerPhone.trim())return alert('Informe o WhatsApp do cliente para o lembrete automático.');
+    setLoading(true);
+    try{
+      const total=Math.max(1,Number(form.installments||1));
+      const [y,m,d]=form.dueDate.split('-').map(Number);
+      const base=new Date(y,m-1,d,12,0,0);
+      const created=[];
+      for(let i=0;i<total;i++){
+        const due=new Date(base.getFullYear(),base.getMonth()+i,base.getDate(),12,0,0);
+        const yyyy=due.getFullYear();
+        const mm=String(due.getMonth()+1).padStart(2,'0');
+        const dd=String(due.getDate()).padStart(2,'0');
+        const item={
+          id:generateId('FIN'),
+          companyId:form.companyId,
+          description:total>1?`${form.description} ${i+1}/${total}`:form.description,
+          amount:numericAmount,
+          dueDate:`${yyyy}-${mm}-${dd}`,
+          status:'pending',
+          paymentMethod:'pix',
+          customerPhone:form.customerPhone.trim(),
+          paymentNotes:form.paymentNotes.trim()||null,
+          reminderSent:false,
+          reminderSentAt:null,
+          paidAt:null,
+        };
+        const r=await fetchSupabase('/rest/v1/financials',{method:'POST',body:JSON.stringify(item)});
+        if(r.error)throw new Error(r.error.message||'Erro ao criar cobrança.');
+        created.push(item);
+      }
+      setFinancials(x=>[...created,...x]);
+      setForm({companyId:'',description:'',amount:'',dueDate:'',installments:1,customerPhone:'',paymentNotes:''});
+    }catch(err){alert(err.message||'Erro ao criar cobrança.');}
+    finally{setLoading(false);}
+  };
+
+  const markPaid=async id=>{
+    const updates={status:'paid',paidAt:new Date().toISOString()};
+    const r=await fetchSupabase(`/rest/v1/financials?id=eq.${id}`,{method:'PATCH',body:JSON.stringify(updates)});
+    if(r.error)return alert(r.error.message||'Erro ao confirmar pagamento.');
+    setFinancials(x=>x.map(f=>f.id===id?{...f,...updates}:f));
+  };
+
+  const reopen=async id=>{
+    const updates={status:'pending',paidAt:null};
+    const r=await fetchSupabase(`/rest/v1/financials?id=eq.${id}`,{method:'PATCH',body:JSON.stringify(updates)});
+    if(r.error)return alert(r.error.message||'Erro ao reabrir cobrança.');
+    setFinancials(x=>x.map(f=>f.id===id?{...f,...updates}:f));
+  };
+
+  const resetReminder=async id=>{
+    const updates={reminderSent:false,reminderSentAt:null};
+    const r=await fetchSupabase(`/rest/v1/financials?id=eq.${id}`,{method:'PATCH',body:JSON.stringify(updates)});
+    if(r.error)return alert(r.error.message||'Erro ao liberar novo lembrete.');
+    setFinancials(x=>x.map(f=>f.id===id?{...f,...updates}:f));
+  };
+
+  const isOverdue=f=>f.status==='pending'&&f.dueDate&&new Date(`${f.dueDate}T23:59:59`)<new Date();
+  const rows=financials.filter(f=>{
+    if(filter==='all')return true;
+    if(filter==='overdue')return isOverdue(f);
+    return f.status===filter;
+  }).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
+  const pending=financials.filter(f=>f.status==='pending').reduce((sum,f)=>sum+Number(f.amount||0),0);
+  const paid=financials.filter(f=>f.status==='paid').reduce((sum,f)=>sum+Number(f.amount||0),0);
+  const overdueCount=financials.filter(isOverdue).length;
+
+  return <div className="space-y-7">
+    <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+      <div><h2 className="page-title">Financeiro</h2><p className="page-subtitle">Cadastre cobranças PIX. O n8n usará vencimento e WhatsApp para enviar os lembretes.</p></div>
+      <div className="text-sm text-slate-500 bg-white border border-slate-200 rounded-xl px-4 py-3">
+        PIX configurado: <span className="text-slate-900">{financialSettings?.pix_key?'Sim':'Não'}</span>
+      </div>
+    </div>
+
+    <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <Metric icon={WalletCards} label="A receber" value={money(pending)}/>
+      <Metric icon={CheckCircle2} label="Recebido" value={money(paid)}/>
+      <Metric icon={AlertCircle} label="Vencidas" value={overdueCount}/>
+      <Metric icon={Bell} label="Lembretes enviados" value={financials.filter(f=>f.reminderSent).length}/>
+    </div>
+
+    <form onSubmit={create} className="card p-5 sm:p-6 grid md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <Field label="Cliente"><select className="input" value={form.companyId} onChange={e=>setForm({...form,companyId:e.target.value})} required><option value="">Selecione...</option>{companies.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
+      <Field label="Descrição"><input className="input" placeholder="Ex: Parcela desenvolvimento" value={form.description} onChange={e=>setForm({...form,description:e.target.value})} required/></Field>
+      <Field label="Valor"><input className="input" inputMode="decimal" placeholder="Ex: 490,00" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} required/></Field>
+      <Field label="1º vencimento"><input className="input" type="date" value={form.dueDate} onChange={e=>setForm({...form,dueDate:e.target.value})} required/></Field>
+      <Field label="Quantidade de parcelas"><input className="input" type="number" min="1" max="36" value={form.installments} onChange={e=>setForm({...form,installments:e.target.value})}/></Field>
+      <Field label="WhatsApp para lembrete"><input className="input" inputMode="tel" placeholder="5511999999999" value={form.customerPhone} onChange={e=>setForm({...form,customerPhone:e.target.value.replace(/\D/g,'')})} required/></Field>
+      <div className="md:col-span-2"><Field label="Observação opcional"><input className="input" placeholder="Ex: Referente ao desenvolvimento do CRM" value={form.paymentNotes} onChange={e=>setForm({...form,paymentNotes:e.target.value})}/></Field></div>
+      <div className="md:col-span-2 xl:col-span-4 flex flex-wrap items-center gap-3">
+        <button className="btn-primary" disabled={loading}>{loading?'Criando...':'Gerar cobrança'}</button>
+        <span className="text-xs text-slate-400">O n8n enviará somente cobranças pendentes com lembrete ainda não enviado.</span>
+      </div>
+    </form>
+
+    <div className="flex gap-2 flex-wrap">{['all','pending','overdue','paid'].map(x=><button key={x} onClick={()=>setFilter(x)} className={`px-4 py-2 rounded-xl text-sm font-normal ${filter===x?'bg-slate-950 text-white':'bg-white border border-slate-200'}`}>{x==='all'?'Todas':x==='pending'?'Pendentes':x==='overdue'?'Vencidas':'Pagas'}</button>)}</div>
+
+    <div className="space-y-3">{rows.length?rows.map(f=>{
+      const overdue=isOverdue(f);
+      return <div key={f.id} className="card p-4 sm:p-5">
+        <div className="flex flex-col xl:flex-row xl:items-center gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="font-normal text-slate-950">{companies.find(c=>c.id===f.companyId)?.name||'Cliente'}</div>
+            <div className="text-sm text-slate-500 mt-1">{f.description} • Vence {dateBR(f.dueDate)}</div>
+            <div className="text-xs text-slate-400 mt-2">WhatsApp: {f.customerPhone||'Não informado'}{f.paymentNotes?` • ${f.paymentNotes}`:''}</div>
+          </div>
+          <div className="text-xl font-normal">{money(f.amount)}</div>
+          {overdue?<span className="status status-warn">Vencida</span>:<PaymentStatus status={f.status}/>} 
+          <div className="text-xs text-slate-500 xl:w-40">{f.reminderSent?<><span className="text-emerald-700">Lembrete enviado</span><br/>{f.reminderSentAt&&new Date(f.reminderSentAt).toLocaleString('pt-BR')}</>:<span>Aguardando automação</span>}</div>
+          <div className="flex flex-wrap gap-2">
+            {f.status!=='paid'?<button onClick={()=>markPaid(f.id)} className="btn-dark">Marcar pago</button>:<button onClick={()=>reopen(f.id)} className="btn-secondary">Reabrir</button>}
+            {f.reminderSent&&f.status!=='paid'&&<button onClick={()=>resetReminder(f.id)} className="btn-secondary">Liberar lembrete</button>}
+          </div>
+        </div>
+      </div>
+    }):<Empty title="Nenhuma cobrança" text="Não há cobranças neste filtro."/>}</div>
+  </div>;
+}
+
+function AdminFinancialSettings(){
+  const {financialSettings,setFinancialSettings,fetchSupabase}=useContext(AppContext);
+  const [form,setForm]=useState({pix_key:'',pix_name:'',pix_bank:'',reminder_enabled:true});
+  const [loading,setLoading]=useState(false);
+  const [message,setMessage]=useState('');
+
+  useEffect(()=>{
+    if(financialSettings)setForm({
+      pix_key:financialSettings.pix_key||'',
+      pix_name:financialSettings.pix_name||'',
+      pix_bank:financialSettings.pix_bank||'',
+      reminder_enabled:financialSettings.reminder_enabled!==false,
+    });
+  },[financialSettings]);
+
+  const save=async e=>{
+    e.preventDefault();setLoading(true);setMessage('');
+    const payload={...form,updated_at:new Date().toISOString()};
+    const r=await fetchSupabase('/rest/v1/ls_financial_settings?id=eq.default',{method:'PATCH',body:JSON.stringify(payload)});
+    if(r.error){setLoading(false);return setMessage(r.error.message||'Erro ao salvar.');}
+    setFinancialSettings(prev=>({...((prev)||{id:'default'}),...payload}));
+    setMessage('Configurações financeiras salvas.');setLoading(false);
+  };
+
+  return <div className="max-w-3xl space-y-6">
+    <div><h2 className="page-title">Configurações financeiras</h2><p className="page-subtitle">Dados PIX usados no portal e nas mensagens automáticas do n8n.</p></div>
+    <form onSubmit={save} className="card p-6 sm:p-8 space-y-5">
+      {message&&<Notice type={message.includes('salvas')?'success':'error'}>{message}</Notice>}
+      <Field label="Chave PIX"><input className="input" placeholder="CPF, CNPJ, e-mail, telefone ou chave aleatória" value={form.pix_key} onChange={e=>setForm({...form,pix_key:e.target.value})} required/></Field>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <Field label="Nome do favorecido"><input className="input" placeholder="Ex: LS Tecnologia" value={form.pix_name} onChange={e=>setForm({...form,pix_name:e.target.value})} required/></Field>
+        <Field label="Banco"><input className="input" placeholder="Ex: Nubank" value={form.pix_bank} onChange={e=>setForm({...form,pix_bank:e.target.value})}/></Field>
+      </div>
+      <label className="flex items-center gap-3 p-4 rounded-2xl bg-slate-50 border border-slate-100 cursor-pointer">
+        <input type="checkbox" checked={form.reminder_enabled} onChange={e=>setForm({...form,reminder_enabled:e.target.checked})}/>
+        <div><div className="text-sm text-slate-800">Lembretes automáticos ativos</div><div className="text-xs text-slate-500 mt-1">O n8n poderá usar esta configuração para decidir se deve enviar cobranças.</div></div>
+      </label>
+      <button className="btn-primary" disabled={loading}>{loading?'Salvando...':'Salvar configurações'}</button>
+    </form>
+  </div>;
 }
 
 function AdminTickets(){
@@ -603,7 +777,7 @@ function ClientPortal(){
 
 function ClientHome({go}){
   const {currentUser,companies,projects,financials}=useContext(AppContext);const company=companies.find(c=>c.id===currentUser.companyId);const mine=projects.filter(p=>p.companyId===currentUser.companyId);const open=financials.filter(f=>f.companyId===currentUser.companyId&&f.status==='pending').sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));const next=open[0];
-  return <div className="space-y-7"><div className="relative overflow-hidden rounded-[28px] bg-slate-950 text-white p-7 sm:p-10"><div className="absolute right-0 top-0 w-72 h-72 bg-blue-500/20 blur-3xl rounded-full"/><div className="relative"><p className="text-blue-300 text-sm font-normal">{company?.name}</p><h2 className="text-3xl sm:text-4xl font-normal mt-2">Olá, {currentUser.name?.split(' ')[0]}.</h2><p className="text-slate-400 mt-3">Acompanhe o que está acontecendo agora com a LS.</p></div></div><div className="grid xl:grid-cols-3 gap-5"><div className="xl:col-span-2 space-y-5">{mine.map(p=><div key={p.id} className="card p-6"><div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><h3 className="font-normal text-xl">{p.name}</h3><div className="mt-2"><StageBadge stage={p.stage}/></div></div><div className="text-right"><div className="text-3xl font-normal">{Number(p.progress||0)}%</div><div className="text-xs text-slate-400">concluído</div></div></div><div className="mt-5"><Progress value={p.progress}/></div><div className="grid sm:grid-cols-2 gap-3 mt-5"><InfoCard label="Próximo passo" value={p.nextStep||'A definir'}/><InfoCard label="Previsão" value={dateBR(p.deadline)}/></div><button onClick={()=>go('projects')} className="mt-5 text-sm font-normal text-blue-700 flex items-center gap-1">Ver detalhes <ArrowRight size={15}/></button></div>)}</div><div className="space-y-5"><div className="card p-6"><div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center"><BadgeDollarSign/></div><h3 className="font-normal mt-4">Próxima cobrança</h3>{next?<><div className="text-2xl font-normal mt-3">{money(next.amount)}</div><div className="text-sm text-slate-500">{next.description}</div><div className="text-xs text-slate-400 mt-2">Vencimento {dateBR(next.dueDate)}</div><button onClick={()=>go('financial')} className="btn-primary w-full mt-5">Ir para pagamento</button></>:<p className="text-sm text-slate-500 mt-3">Nenhuma pendência financeira.</p>}</div></div></div></div>;
+  return <div className="space-y-7"><div className="relative overflow-hidden rounded-[28px] bg-slate-950 text-white p-7 sm:p-10"><div className="absolute right-0 top-0 w-72 h-72 bg-blue-500/20 blur-3xl rounded-full"/><div className="relative"><p className="text-blue-300 text-sm font-normal">{company?.name}</p><h2 className="text-3xl sm:text-4xl font-normal mt-2">Olá, {currentUser.name?.split(' ')[0]}.</h2><p className="text-slate-400 mt-3">Acompanhe o que está acontecendo agora com a LS.</p></div></div><div className="grid xl:grid-cols-3 gap-5"><div className="xl:col-span-2 space-y-5">{mine.map(p=><div key={p.id} className="card p-6"><div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><h3 className="font-normal text-xl">{p.name}</h3><div className="mt-2"><StageBadge stage={p.stage}/></div></div><div className="text-right"><div className="text-3xl font-normal">{Number(p.progress||0)}%</div><div className="text-xs text-slate-400">concluído</div></div></div><div className="mt-5"><Progress value={p.progress}/></div><div className="grid sm:grid-cols-2 gap-3 mt-5"><InfoCard label="Próximo passo" value={p.nextStep||'A definir'}/><InfoCard label="Previsão" value={dateBR(p.deadline)}/></div><button onClick={()=>go('projects')} className="mt-5 text-sm font-normal text-blue-700 flex items-center gap-1">Ver detalhes <ArrowRight size={15}/></button></div>)}</div><div className="space-y-5"><div className="card p-6"><div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center"><BadgeDollarSign/></div><h3 className="font-normal mt-4">Próxima cobrança</h3>{next?<><div className="text-2xl font-normal mt-3">{money(next.amount)}</div><div className="text-sm text-slate-500">{next.description}</div><div className="text-xs text-slate-400 mt-2">Vencimento {dateBR(next.dueDate)}</div><button onClick={()=>go('financial')} className="btn-primary w-full mt-5">Ver financeiro</button></>:<p className="text-sm text-slate-500 mt-3">Nenhuma pendência financeira.</p>}</div></div></div></div>;
 }
 
 function ClientProjects(){
@@ -613,9 +787,43 @@ function ClientProjects(){
 }
 
 function ClientFinancial(){
-  const {currentUser,financials,setFinancials}=useContext(AppContext);const [loading,setLoading]=useState(null);const mine=financials.filter(f=>f.companyId===currentUser.companyId).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
-  const pay=async f=>{setLoading(f.id);try{let url=f.paymentUrl;if(!url){const {data,error}=await supabase.functions.invoke('create-asaas-payment-link',{body:{financialId:f.id,successUrl:`${window.location.origin}?payment=success`}});if(error)throw error;if(data?.error)throw new Error(data.error);url=data.url;setFinancials(x=>x.map(i=>i.id===f.id?{...i,paymentUrl:data.url,asaasPaymentLinkId:data.id}:i));}window.open(url,'_blank','noopener,noreferrer');}catch(err){alert(err.message||'Erro ao abrir pagamento.')}finally{setLoading(null)}};
-  const pending=mine.filter(f=>f.status==='pending').reduce((s,f)=>s+Number(f.amount||0),0);return <div className="space-y-6"><div><h2 className="page-title">Financeiro</h2><p className="page-subtitle">Veja cobranças, vencimentos e pague online pelo Asaas.</p></div><div className="grid sm:grid-cols-2 gap-4"><Metric icon={WalletCards} label="Em aberto" value={money(pending)}/><Metric icon={CheckCircle2} label="Pagas" value={mine.filter(f=>f.status==='paid').length}/></div><div className="space-y-3">{mine.map(f=><div key={f.id} className="card p-5 flex flex-col md:flex-row md:items-center gap-4"><div className="flex-1"><div className="font-normal">{f.description}</div><div className="text-sm text-slate-500 mt-1">Vencimento {dateBR(f.dueDate)}</div></div><div className="font-normal text-xl">{money(f.amount)}</div><PaymentStatus status={f.status}/>{f.status!=='paid'&&<button onClick={()=>pay(f)} disabled={loading===f.id} className="btn-primary">{loading===f.id?'Abrindo...':'Pagar agora'}</button>}</div>)}</div></div>;
+  const {currentUser,financials,financialSettings}=useContext(AppContext);
+  const [copied,setCopied]=useState(false);
+  const mine=financials.filter(f=>f.companyId===currentUser.companyId).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
+  const pending=mine.filter(f=>f.status==='pending').reduce((sum,f)=>sum+Number(f.amount||0),0);
+  const copyPix=async()=>{
+    if(!financialSettings?.pix_key)return;
+    try{await navigator.clipboard.writeText(financialSettings.pix_key);setCopied(true);setTimeout(()=>setCopied(false),1800);}catch{alert('Não foi possível copiar automaticamente. Selecione a chave PIX manualmente.');}
+  };
+  const isOverdue=f=>f.status==='pending'&&f.dueDate&&new Date(`${f.dueDate}T23:59:59`)<new Date();
+
+  return <div className="space-y-6">
+    <div><h2 className="page-title">Financeiro</h2><p className="page-subtitle">Consulte suas cobranças e os dados PIX para pagamento.</p></div>
+    <div className="grid sm:grid-cols-2 gap-4"><Metric icon={WalletCards} label="Em aberto" value={money(pending)}/><Metric icon={CheckCircle2} label="Pagas" value={mine.filter(f=>f.status==='paid').length}/></div>
+
+    <div className="card p-6 sm:p-7 bg-gradient-to-br from-slate-950 to-slate-900 text-white border-slate-800">
+      <div className="flex flex-col md:flex-row md:items-center gap-5">
+        <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center"><BadgeDollarSign/></div>
+        <div className="flex-1 min-w-0">
+          <div className="text-xs uppercase tracking-wider text-slate-400">Pagamento via PIX</div>
+          <div className="text-lg mt-2 break-all">{financialSettings?.pix_key||'Chave PIX ainda não cadastrada'}</div>
+          <div className="text-sm text-slate-400 mt-2">{financialSettings?.pix_name||'LS Tecnologia'}{financialSettings?.pix_bank?` • ${financialSettings.pix_bank}`:''}</div>
+        </div>
+        {financialSettings?.pix_key&&<button onClick={copyPix} className="bg-white text-slate-950 rounded-xl px-4 py-3 text-sm">{copied?'Chave copiada':'Copiar chave PIX'}</button>}
+      </div>
+    </div>
+
+    <div className="space-y-3">{mine.length?mine.map(f=>{
+      const overdue=isOverdue(f);
+      return <div key={f.id} className="card p-5 flex flex-col md:flex-row md:items-center gap-4">
+        <div className="flex-1"><div className="font-normal">{f.description}</div><div className="text-sm text-slate-500 mt-1">Vencimento {dateBR(f.dueDate)}</div>{f.paymentNotes&&<div className="text-xs text-slate-400 mt-2">{f.paymentNotes}</div>}</div>
+        <div className="font-normal text-xl">{money(f.amount)}</div>
+        {overdue?<span className="status status-warn">Vencida</span>:<PaymentStatus status={f.status}/>} 
+      </div>
+    }):<Empty title="Nenhuma cobrança" text="Você não possui cobranças registradas no momento."/>}</div>
+
+    <div className="text-xs text-slate-500 px-1">No dia do vencimento, a LS poderá enviar um lembrete automático pelo WhatsApp com o valor e a chave PIX.</div>
+  </div>;
 }
 
 function ClientSupport(){
