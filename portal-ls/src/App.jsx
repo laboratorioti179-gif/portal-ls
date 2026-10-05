@@ -413,6 +413,8 @@ function AdminDashboard() {
 function AdminClients() {
   const { companies, projects, financials, fetchSupabase, setCompanies } = useContext(AppContext);
   const [search, setSearch] = useState('');
+  const [sortOrder, setSortOrder] = useState('oldest');
+  const [expandedId, setExpandedId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [companyForm, setCompanyForm] = useState({
     name:'',
@@ -427,24 +429,37 @@ function AdminClients() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
-  const filtered = companies.filter(c => {
-    const q = search.toLowerCase().trim();
-    if (!q) return true;
-    return [
-      c.name,
-      c.cnpj,
-      c.clientName,
-      c.phone,
-      c.responsible,
-      c.email,
-      c.product,
-      c.id,
-      c.paymentPlan
-    ].filter(Boolean).some(v => String(v).toLowerCase().includes(q));
-  });
+  const indexedCompanies = companies.map((company, index) => ({
+    company,
+    originalIndex: index
+  }));
+
+  const filtered = indexedCompanies
+    .filter(({ company:c }) => {
+      const q = search.toLowerCase().trim();
+      if (!q) return true;
+      return [
+        c.name,
+        c.cnpj,
+        c.clientName,
+        c.phone,
+        c.responsible,
+        c.email,
+        c.product,
+        c.id,
+        c.paymentPlan
+      ].filter(Boolean).some(v => String(v).toLowerCase().includes(q));
+    })
+    .sort((a, b) =>
+      sortOrder === 'newest'
+        ? b.originalIndex - a.originalIndex
+        : a.originalIndex - b.originalIndex
+    )
+    .map(item => item.company);
 
   const beginEdit = c => {
     setEditingId(c.id);
+    setExpandedId(c.id);
     setMessage('');
     setCompanyForm({
       name:c.name||'',
@@ -508,18 +523,37 @@ function AdminClients() {
     }
 
     setCompanies(x => x.filter(c => c.id !== id));
+    if (expandedId === id) setExpandedId(null);
+  };
+
+  const toggleExpand = id => {
+    if (editingId === id) return;
+    setExpandedId(current => current === id ? null : id);
   };
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+      <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-3">
         <div>
           <h2 className="page-title">Clientes</h2>
           <p className="page-subtitle">
-            Cadastro comercial completo em cards compactos e editáveis.
+            Lista compacta. Clique em um cliente para visualizar todas as informações.
           </p>
         </div>
-        <SearchBox value={search} onChange={setSearch}/>
+
+        <div className="flex flex-col sm:flex-row gap-2 w-full xl:w-auto">
+          <SearchBox value={search} onChange={setSearch}/>
+
+          <select
+            className="input compact-input sm:w-40"
+            value={sortOrder}
+            onChange={e => setSortOrder(e.target.value)}
+            aria-label="Ordenar clientes"
+          >
+            <option value="oldest">Mais antigo</option>
+            <option value="newest">Mais novo</option>
+          </select>
+        </div>
       </div>
 
       {message && (
@@ -528,7 +562,7 @@ function AdminClients() {
         </Notice>
       )}
 
-      <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-3">
+      <div className="space-y-2">
         {filtered.map(c => {
           const clientProjects = projects.filter(p => p.companyId === c.id);
           const clientFinancials = financials.filter(f => f.companyId === c.id);
@@ -540,157 +574,240 @@ function AdminClients() {
             .reduce((s,f) => s + Number(f.amount || 0), 0);
 
           const isEditing = editingId === c.id;
+          const isExpanded = expandedId === c.id;
 
           return (
-            <article key={c.id} className="card compact-card p-4">
-              <div className="flex items-start gap-3">
-                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center flex-none">
-                  <Building2 size={16}/>
+            <article
+              key={c.id}
+              className={`card compact-card overflow-hidden transition-all ${
+                isExpanded ? 'ring-1 ring-blue-100' : ''
+              }`}
+            >
+              <div
+                className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-slate-50/70 transition-colors"
+                onClick={() => toggleExpand(c.id)}
+              >
+                <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center flex-none">
+                  <Building2 size={15}/>
                 </div>
 
                 <div className="min-w-0 flex-1">
-                  {isEditing ? (
-                    <input
-                      className="input compact-input"
-                      value={companyForm.name}
-                      onChange={e => setCompanyForm(f => ({...f,name:e.target.value}))}
-                    />
-                  ) : (
-                    <div className="text-[13px] text-slate-900 truncate">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-[11px] text-slate-900 truncate">
                       {c.name}
+                    </span>
+                    {c.product && (
+                      <span className="status status-info hidden sm:inline-flex">
+                        {c.product}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] text-slate-400 mt-0.5">
+                    <span>{c.cnpj || 'Sem CNPJ/CPF'}</span>
+                    <span>{c.responsible || c.clientName || 'Sem responsável'}</span>
+                    <span>{c.phone || 'Sem telefone'}</span>
+                  </div>
+                </div>
+
+                <div className="hidden md:grid grid-cols-3 gap-4 text-right flex-none">
+                  <div>
+                    <div className="text-[8px] uppercase tracking-wider text-slate-400">Projetos</div>
+                    <div className="text-[10px] text-slate-700 mt-0.5">{clientProjects.length}</div>
+                  </div>
+
+                  <div>
+                    <div className="text-[8px] uppercase tracking-wider text-slate-400">A receber</div>
+                    <div className="text-[10px] text-slate-700 mt-0.5">{money(openAmount)}</div>
+                  </div>
+
+                  <div>
+                    <div className="text-[8px] uppercase tracking-wider text-slate-400">Recebido</div>
+                    <div className="text-[10px] text-slate-700 mt-0.5">{money(paidAmount)}</div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation();
+                    toggleExpand(c.id);
+                  }}
+                  className="w-7 h-7 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:bg-slate-50 flex-none"
+                  aria-label={isExpanded ? 'Recolher cliente' : 'Expandir cliente'}
+                >
+                  {isExpanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                </button>
+              </div>
+
+              {isExpanded && (
+                <div className="border-t border-slate-100 px-4 py-4 bg-white">
+                  {isEditing ? (
+                    <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-2">
+                      <Field label="Empresa">
+                        <input
+                          className="input compact-input"
+                          value={companyForm.name}
+                          onChange={e => setCompanyForm(f => ({...f,name:e.target.value}))}
+                        />
+                      </Field>
+
+                      <Field label="CNPJ / CPF">
+                        <input
+                          className="input compact-input"
+                          value={companyForm.cnpj}
+                          onChange={e => setCompanyForm(f => ({...f,cnpj:e.target.value}))}
+                        />
+                      </Field>
+
+                      <Field label="Nome">
+                        <input
+                          className="input compact-input"
+                          value={companyForm.clientName}
+                          onChange={e => setCompanyForm(f => ({...f,clientName:e.target.value}))}
+                        />
+                      </Field>
+
+                      <Field label="Telefone">
+                        <input
+                          className="input compact-input"
+                          inputMode="tel"
+                          value={companyForm.phone}
+                          onChange={e => setCompanyForm(f => ({...f,phone:e.target.value}))}
+                        />
+                      </Field>
+
+                      <Field label="Responsável">
+                        <input
+                          className="input compact-input"
+                          value={companyForm.responsible}
+                          onChange={e => setCompanyForm(f => ({...f,responsible:e.target.value}))}
+                        />
+                      </Field>
+
+                      <Field label="E-mail">
+                        <input
+                          className="input compact-input"
+                          type="email"
+                          value={companyForm.email}
+                          onChange={e => setCompanyForm(f => ({...f,email:e.target.value}))}
+                        />
+                      </Field>
+
+                      <Field label="Produto">
+                        <select
+                          className="input compact-input"
+                          value={companyForm.product}
+                          onChange={e => setCompanyForm(f => ({...f,product:e.target.value}))}
+                        >
+                          <option value="">Selecione...</option>
+                          <option value="Automação">Automação</option>
+                          <option value="Sistema">Sistema</option>
+                          <option value="Aplicativo">Aplicativo</option>
+                        </select>
+                      </Field>
+
+                      <Field label="Plano de pagamento">
+                        <input
+                          className="input compact-input"
+                          value={companyForm.paymentPlan}
+                          onChange={e => setCompanyForm(f => ({...f,paymentPlan:e.target.value}))}
+                        />
+                      </Field>
+
+                      <div className="sm:col-span-2 xl:col-span-4 flex justify-between gap-2 mt-1 pt-3 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => remove(c.id)}
+                          className="mini-btn text-red-600"
+                        >
+                          Excluir
+                        </button>
+
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditingId(null)}
+                            className="mini-btn"
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            type="button"
+                            disabled={saving}
+                            onClick={() => save(c)}
+                            className="mini-btn mini-btn-primary"
+                          >
+                            {saving ? 'Salvando...' : 'Salvar'}
+                          </button>
+                        </div>
+                      </div>
                     </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
+                        <div className="mini-card">
+                          <span>CNPJ / CPF</span>
+                          <b>{c.cnpj || 'Não informado'}</b>
+                        </div>
+
+                        <div className="mini-card">
+                          <span>Nome</span>
+                          <b>{c.clientName || 'Não informado'}</b>
+                        </div>
+
+                        <div className="mini-card">
+                          <span>Telefone</span>
+                          <b>{c.phone || 'Não informado'}</b>
+                        </div>
+
+                        <div className="mini-card">
+                          <span>Responsável</span>
+                          <b>{c.responsible || 'Não informado'}</b>
+                        </div>
+
+                        <div className="mini-card sm:col-span-2">
+                          <span>E-mail</span>
+                          <b>{c.email || 'Não informado'}</b>
+                        </div>
+
+                        <div className="mini-card">
+                          <span>Produto</span>
+                          <b>{c.product || 'Não definido'}</b>
+                        </div>
+
+                        <div className="mini-card">
+                          <span>Projetos</span>
+                          <b>{clientProjects.length}</b>
+                        </div>
+
+                        <div className="mini-card">
+                          <span>A receber</span>
+                          <b>{money(openAmount)}</b>
+                        </div>
+
+                        <div className="mini-card">
+                          <span>Recebido</span>
+                          <b>{money(paidAmount)}</b>
+                        </div>
+
+                        <div className="mini-card sm:col-span-2">
+                          <span>Plano de pagamento</span>
+                          <b>{c.paymentPlan || 'Não definido'}</b>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end mt-3 pt-3 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => beginEdit(c)}
+                          className="mini-btn mini-btn-primary"
+                        >
+                          Editar informações
+                        </button>
+                      </div>
+                    </>
                   )}
-                  <div className="text-[9px] text-slate-400 mt-0.5 truncate">
-                    {c.id}
-                  </div>
-                </div>
-
-                {!isEditing && (
-                  <button onClick={() => beginEdit(c)} className="mini-btn">
-                    Editar
-                  </button>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 mt-3">
-                <div className="mini-card">
-                  <span>CNPJ / CPF</span>
-                  {isEditing ? (
-                    <input
-                      className="input compact-input mt-1"
-                      value={companyForm.cnpj}
-                      onChange={e => setCompanyForm(f => ({...f,cnpj:e.target.value}))}
-                    />
-                  ) : <b>{c.cnpj || 'Não informado'}</b>}
-                </div>
-
-                <div className="mini-card">
-                  <span>Nome</span>
-                  {isEditing ? (
-                    <input
-                      className="input compact-input mt-1"
-                      value={companyForm.clientName}
-                      onChange={e => setCompanyForm(f => ({...f,clientName:e.target.value}))}
-                    />
-                  ) : <b>{c.clientName || 'Não informado'}</b>}
-                </div>
-
-                <div className="mini-card">
-                  <span>Telefone</span>
-                  {isEditing ? (
-                    <input
-                      className="input compact-input mt-1"
-                      inputMode="tel"
-                      value={companyForm.phone}
-                      onChange={e => setCompanyForm(f => ({...f,phone:e.target.value}))}
-                    />
-                  ) : <b>{c.phone || 'Não informado'}</b>}
-                </div>
-
-                <div className="mini-card">
-                  <span>Responsável</span>
-                  {isEditing ? (
-                    <input
-                      className="input compact-input mt-1"
-                      value={companyForm.responsible}
-                      onChange={e => setCompanyForm(f => ({...f,responsible:e.target.value}))}
-                    />
-                  ) : <b>{c.responsible || 'Não informado'}</b>}
-                </div>
-
-                <div className="mini-card col-span-2">
-                  <span>E-mail</span>
-                  {isEditing ? (
-                    <input
-                      className="input compact-input mt-1"
-                      type="email"
-                      value={companyForm.email}
-                      onChange={e => setCompanyForm(f => ({...f,email:e.target.value}))}
-                    />
-                  ) : <b className="break-all">{c.email || 'Não informado'}</b>}
-                </div>
-
-                <div className="mini-card">
-                  <span>Produto</span>
-                  {isEditing ? (
-                    <select
-                      className="input compact-input mt-1"
-                      value={companyForm.product}
-                      onChange={e => setCompanyForm(f => ({...f,product:e.target.value}))}
-                    >
-                      <option value="">Selecione...</option>
-                      <option value="Automação">Automação</option>
-                      <option value="Sistema">Sistema</option>
-                      <option value="Aplicativo">Aplicativo</option>
-                    </select>
-                  ) : <b>{c.product || 'Não definido'}</b>}
-                </div>
-
-                <div className="mini-card">
-                  <span>Projetos</span>
-                  <b>{clientProjects.length}</b>
-                </div>
-
-                <div className="mini-card">
-                  <span>A receber</span>
-                  <b>{money(openAmount)}</b>
-                </div>
-
-                <div className="mini-card">
-                  <span>Recebido</span>
-                  <b>{money(paidAmount)}</b>
-                </div>
-              </div>
-
-              <div className="mini-card mt-2">
-                <span>Plano de pagamento</span>
-                {isEditing ? (
-                  <input
-                    className="input compact-input mt-1"
-                    value={companyForm.paymentPlan}
-                    onChange={e => setCompanyForm(f => ({...f,paymentPlan:e.target.value}))}
-                  />
-                ) : <b>{c.paymentPlan || 'Não definido'}</b>}
-              </div>
-
-              {isEditing && (
-                <div className="flex justify-between gap-2 mt-3 pt-3 border-t border-slate-100">
-                  <button onClick={() => remove(c.id)} className="mini-btn text-red-600">
-                    Excluir
-                  </button>
-
-                  <div className="flex gap-2">
-                    <button onClick={() => setEditingId(null)} className="mini-btn">
-                      Cancelar
-                    </button>
-                    <button
-                      disabled={saving}
-                      onClick={() => save(c)}
-                      className="mini-btn mini-btn-primary"
-                    >
-                      {saving ? 'Salvando...' : 'Salvar'}
-                    </button>
-                  </div>
                 </div>
               )}
             </article>
@@ -1319,6 +1436,71 @@ function AdminFinancial() {
     }
   };
 
+  const deleteFinancialPlan = async group => {
+    const confirmed = window.confirm(
+      `Excluir todo o plano financeiro de ${group.company.name}?\n\n` +
+      'Isso apagará todas as parcelas e zerará os valores de desenvolvimento financeiro deste cliente. ' +
+      'O cadastro do cliente e os projetos não serão excluídos.'
+    );
+
+    if (!confirmed) return;
+
+    setLoading(true);
+
+    try {
+      const deleteRes = await fetchSupabase(
+        `/rest/v1/financials?companyId=eq.${encodeURIComponent(group.company.id)}`,
+        { method: 'DELETE' }
+      );
+
+      if (deleteRes.error) {
+        throw new Error(deleteRes.error.message || 'Erro ao excluir parcelas.');
+      }
+
+      const companyUpdates = {
+        developmentAmount: 0,
+        developmentPaidAmount: 0,
+        paymentPlan: null
+      };
+
+      const companyRes = await fetchSupabase(
+        `/rest/v1/companies?id=eq.${encodeURIComponent(group.company.id)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(companyUpdates)
+        }
+      );
+
+      if (companyRes.error) {
+        throw new Error(companyRes.error.message || 'Erro ao zerar dados financeiros do cliente.');
+      }
+
+      setFinancials(current =>
+        current.filter(f => f.companyId !== group.company.id)
+      );
+
+      setCompanies(current =>
+        current.map(c =>
+          c.id === group.company.id ? { ...c, ...companyUpdates } : c
+        )
+      );
+
+      if (expandedCompanyId === group.company.id) {
+        setExpandedCompanyId(null);
+      }
+
+      if (editingCompanyId === group.company.id) {
+        setEditingCompanyId(null);
+      }
+
+      alert('Plano financeiro excluído com sucesso.');
+    } catch (err) {
+      alert(err.message || 'Não foi possível excluir o plano financeiro.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const markNextPaid = group => {
     const next = group.pendingItems[0];
     if (next) markPaid(next.id);
@@ -1740,6 +1922,14 @@ function AdminFinancial() {
                   >
                     {expanded ? 'Ocultar parcelas' : 'Gerenciar parcelas'}
                   </button>
+
+                  <button
+                    onClick={() => deleteFinancialPlan(group)}
+                    className="mini-btn text-red-600 border-red-100 hover:bg-red-50"
+                    disabled={loading}
+                  >
+                    Excluir plano financeiro
+                  </button>
                 </div>
               )}
 
@@ -1953,7 +2143,7 @@ function PaymentStatus({status}){return <span className={`status ${status==='pai
 function Progress({value}){const n=Math.max(0,Math.min(100,Number(value||0)));return <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full rounded-full bg-gradient-to-r from-blue-600 to-indigo-500 transition-all" style={{width:`${n}%`}}/></div>}
 function InfoCard({label,value}){return <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100"><div className="text-[10px] uppercase tracking-wider font-normal text-slate-400">{label}</div><div className="font-normal mt-1 break-words">{value}</div></div>}
 function Field({label,children}){return <label className="block"><span className="block text-xs font-normal text-slate-600 mb-2">{label}</span>{children}</label>}
-function SearchBox({value,onChange}){return <div className="relative w-full sm:w-72"><Search size={17} className="absolute left-3 top-3 text-slate-400"/><input className="input pl-10" placeholder="Buscar..." value={value} onChange={e=>onChange(e.target.value)}/></div>}
+function SearchBox({value,onChange}){return <div className="relative w-full sm:w-72"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none z-10"/><input className="input compact-input !pl-9" placeholder="Buscar cliente..." value={value} onChange={e=>onChange(e.target.value)}/></div>}
 function Notice({type='info',children}){const cls=type==='error'?'bg-red-50 text-red-700 border-red-100':type==='success'?'bg-emerald-50 text-emerald-700 border-emerald-100':'bg-blue-50 text-blue-700 border-blue-100';return <div className={`p-3.5 rounded-xl border text-sm font-normal mb-4 ${cls}`}>{children}</div>}
 function Empty({title,text}){return <div className="card p-12 text-center"><div className="w-14 h-14 mx-auto rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400"><BriefcaseBusiness/></div><h3 className="font-normal mt-4">{title}</h3><p className="text-sm text-slate-500 mt-1">{text}</p></div>}
 
