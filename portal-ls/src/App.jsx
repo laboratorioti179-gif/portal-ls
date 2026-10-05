@@ -274,7 +274,7 @@ function PortalShell({ menu, currentView, setView, children, title }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const go = id => { setView(id); setMobileOpen(false); };
   return (
-    <div className="min-h-screen bg-[#f5f7fb] text-slate-900">
+    <div className="portal-ui min-h-screen bg-[#f5f7fb] text-slate-900">
       <aside className={`fixed inset-y-0 left-0 z-40 w-72 bg-slate-950 text-white transform transition-transform duration-300 lg:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="h-20 px-6 border-b border-white/10 flex items-center justify-between">
           <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20"><Sparkles size={20}/></div><div><div className="font-normal tracking-tight">Portal LS</div><div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Tecnologia</div></div></div>
@@ -413,9 +413,8 @@ function AdminDashboard() {
 function AdminClients() {
   const { companies, users, setUsers, projects, financials, tickets, fetchSupabase, setCompanies } = useContext(AppContext);
   const [search, setSearch] = useState('');
-  const [expandedId, setExpandedId] = useState(null);
   const [editingId, setEditingId] = useState(null);
-  const [companyForm, setCompanyForm] = useState({ name: '', cnpj: '', paymentPlan: '' });
+  const [companyForm, setCompanyForm] = useState({ name:'', cnpj:'', paymentPlan:'' });
   const [userDrafts, setUserDrafts] = useState({});
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -424,130 +423,94 @@ function AdminClients() {
     const q = search.toLowerCase().trim();
     if (!q) return true;
     const linked = users.filter(u => u.companyId === c.id);
-    return [c.name, c.cnpj, c.id, c.paymentPlan, ...linked.flatMap(u => [u.name, u.email])]
-      .filter(Boolean).some(v => String(v).toLowerCase().includes(q));
+    return [c.name,c.cnpj,c.id,c.paymentPlan,...linked.flatMap(u=>[u.name,u.email])]
+      .filter(Boolean).some(v=>String(v).toLowerCase().includes(q));
   });
 
   const beginEdit = c => {
-    setEditingId(c.id);
-    setExpandedId(c.id);
-    setMessage('');
-    setCompanyForm({ name: c.name || '', cnpj: c.cnpj || '', paymentPlan: c.paymentPlan || '' });
-    const drafts = {};
-    users.filter(u => u.companyId === c.id).forEach(u => { drafts[u.id] = u.name || ''; });
+    setEditingId(c.id); setMessage('');
+    setCompanyForm({name:c.name||'',cnpj:c.cnpj||'',paymentPlan:c.paymentPlan||''});
+    const drafts={}; users.filter(u=>u.companyId===c.id).forEach(u=>drafts[u.id]=u.name||'');
     setUserDrafts(drafts);
   };
 
   const save = async c => {
     setSaving(true); setMessage('');
     try {
-      const updates = {
-        name: companyForm.name.trim(),
-        cnpj: companyForm.cnpj.trim() || null,
-        paymentPlan: companyForm.paymentPlan.trim() || null,
-      };
-      const cr = await fetchSupabase(`/rest/v1/companies?id=eq.${encodeURIComponent(c.id)}`, { method:'PATCH', body: JSON.stringify(updates) });
-      if (cr.error) throw new Error(cr.error.message || 'Não foi possível atualizar a empresa.');
-
-      const linkedUsers = users.filter(u => u.companyId === c.id);
-      for (const u of linkedUsers) {
-        const newName = (userDrafts[u.id] ?? u.name ?? '').trim();
-        if (newName && newName !== u.name) {
-          const ur = await fetchSupabase(`/rest/v1/profiles?id=eq.${encodeURIComponent(u.id)}`, { method:'PATCH', body: JSON.stringify({ name: newName }) });
-          if (ur.error) throw new Error(ur.error.message || `Não foi possível atualizar ${u.name}.`);
+      const updates={name:companyForm.name.trim(),cnpj:companyForm.cnpj.trim()||null,paymentPlan:companyForm.paymentPlan.trim()||null};
+      const cr=await fetchSupabase(`/rest/v1/companies?id=eq.${encodeURIComponent(c.id)}`,{method:'PATCH',body:JSON.stringify(updates)});
+      if(cr.error) throw new Error(cr.error.message||'Não foi possível atualizar a empresa.');
+      for(const u of users.filter(u=>u.companyId===c.id)){
+        const newName=(userDrafts[u.id]??u.name??'').trim();
+        if(newName && newName!==u.name){
+          const ur=await fetchSupabase(`/rest/v1/profiles?id=eq.${encodeURIComponent(u.id)}`,{method:'PATCH',body:JSON.stringify({name:newName})});
+          if(ur.error) throw new Error(ur.error.message||`Não foi possível atualizar ${u.name}.`);
         }
       }
-
-      setCompanies(prev => prev.map(x => x.id === c.id ? { ...x, ...updates } : x));
-      setUsers(prev => prev.map(u => u.companyId === c.id && userDrafts[u.id] !== undefined ? { ...u, name: userDrafts[u.id].trim() || u.name } : u));
-      setEditingId(null);
-      setMessage('Informações atualizadas com sucesso.');
-    } catch (err) {
-      setMessage(err.message || 'Erro ao salvar alterações.');
-    } finally { setSaving(false); }
+      setCompanies(prev=>prev.map(x=>x.id===c.id?{...x,...updates}:x));
+      setUsers(prev=>prev.map(u=>u.companyId===c.id&&userDrafts[u.id]!==undefined?{...u,name:userDrafts[u.id].trim()||u.name}:u));
+      setEditingId(null); setMessage('Informações atualizadas com sucesso.');
+    } catch(err){ setMessage(err.message||'Erro ao salvar alterações.'); }
+    finally{ setSaving(false); }
   };
 
   const remove = async id => {
-    if (!confirm('Excluir esta empresa?')) return;
-    const r = await fetchSupabase(`/rest/v1/companies?id=eq.${encodeURIComponent(id)}`, { method:'DELETE' });
-    if (r.error) return alert('A empresa possui vínculos e não pôde ser excluída.');
-    setCompanies(x => x.filter(c => c.id !== id));
+    if(!confirm('Excluir esta empresa?')) return;
+    const r=await fetchSupabase(`/rest/v1/companies?id=eq.${encodeURIComponent(id)}`,{method:'DELETE'});
+    if(r.error) return alert('A empresa possui vínculos e não pôde ser excluída.');
+    setCompanies(x=>x.filter(c=>c.id!==id));
   };
 
-  return <div className="space-y-6">
-    <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-      <div><h2 className="page-title">Clientes</h2><p className="page-subtitle">Consulte os dados, veja a operação de cada cliente e edite sem sair da lista.</p></div>
+  return <div className="space-y-4">
+    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+      <div><h2 className="page-title">Clientes</h2><p className="page-subtitle">Informações completas em cards compactos e editáveis.</p></div>
       <SearchBox value={search} onChange={setSearch}/>
     </div>
-
-    {message && <Notice type={message.includes('sucesso') ? 'success' : 'error'}>{message}</Notice>}
-
-    <div className="card overflow-hidden">
-      <div className="hidden xl:grid grid-cols-[1.4fr_1fr_.7fr_.8fr_.9fr_110px] gap-4 px-6 py-3 bg-slate-50 border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500">
-        <div>Cliente</div><div>Responsável</div><div>Projetos</div><div>A receber</div><div>Plano</div><div className="text-right">Ações</div>
-      </div>
-
-      <div className="divide-y divide-slate-100">
-        {filtered.map(c => {
-          const linkedUsers = users.filter(u => u.companyId === c.id);
-          const clientProjects = projects.filter(p => p.companyId === c.id);
-          const clientFinancials = financials.filter(f => f.companyId === c.id);
-          const clientTickets = tickets.filter(t => t.companyId === c.id);
-          const openAmount = clientFinancials.filter(f => f.status === 'pending').reduce((s,f) => s + Number(f.amount || 0), 0);
-          const paidAmount = clientFinancials.filter(f => f.status === 'paid').reduce((s,f) => s + Number(f.amount || 0), 0);
-          const openTickets = clientTickets.filter(t => t.status === 'open').length;
-          const isExpanded = expandedId === c.id;
-          const isEditing = editingId === c.id;
-          const primary = linkedUsers[0];
-
-          return <div key={c.id}>
-            <div className="grid xl:grid-cols-[1.4fr_1fr_.7fr_.8fr_.9fr_110px] gap-4 px-4 sm:px-6 py-5 items-center hover:bg-slate-50/70 transition">
-              <div className="min-w-0">
-                <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center flex-none"><Building2 size={18}/></div><div className="min-w-0"><div className="text-slate-900 truncate">{c.name}</div><div className="text-xs text-slate-400 truncate mt-1">{c.cnpj || 'CNPJ não informado'} • {c.id}</div></div></div>
-              </div>
-              <div className="text-sm"><div className="text-slate-700 truncate">{primary?.name || 'Sem responsável'}</div><div className="text-xs text-slate-400 truncate mt-1">{primary?.email || 'Sem acesso cadastrado'}</div></div>
-              <div className="text-sm text-slate-700"><span className="xl:hidden text-slate-400 mr-2">Projetos:</span>{clientProjects.length}</div>
-              <div className="text-sm text-slate-700"><span className="xl:hidden text-slate-400 mr-2">A receber:</span>{money(openAmount)}</div>
-              <div className="text-sm text-slate-500 truncate"><span className="xl:hidden text-slate-400 mr-2">Plano:</span>{c.paymentPlan || 'Não definido'}</div>
-              <div className="flex xl:justify-end gap-2">
-                <button onClick={() => setExpandedId(isExpanded ? null : c.id)} className="w-9 h-9 rounded-xl border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-white" title="Ver detalhes">{isExpanded ? <ChevronDown size={17}/> : <ChevronRight size={17}/>}</button>
-                <button onClick={() => beginEdit(c)} className="px-3 h-9 rounded-xl bg-slate-950 text-white text-xs hover:bg-slate-800">Editar</button>
-              </div>
+    {message&&<Notice type={message.includes('sucesso')?'success':'error'}>{message}</Notice>}
+    <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-3">
+      {filtered.map(c=>{
+        const linkedUsers=users.filter(u=>u.companyId===c.id);
+        const clientProjects=projects.filter(p=>p.companyId===c.id);
+        const clientFinancials=financials.filter(f=>f.companyId===c.id);
+        const clientTickets=tickets.filter(t=>t.companyId===c.id);
+        const openAmount=clientFinancials.filter(f=>f.status==='pending').reduce((s,f)=>s+Number(f.amount||0),0);
+        const paidAmount=clientFinancials.filter(f=>f.status==='paid').reduce((s,f)=>s+Number(f.amount||0),0);
+        const openTickets=clientTickets.filter(t=>t.status==='open').length;
+        const isEditing=editingId===c.id;
+        const primary=linkedUsers[0];
+        return <article key={c.id} className="card compact-card p-4">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center flex-none"><Building2 size={16}/></div>
+            <div className="min-w-0 flex-1">
+              {isEditing?<input className="input compact-input" value={companyForm.name} onChange={e=>setCompanyForm(f=>({...f,name:e.target.value}))}/>:<div className="text-[13px] text-slate-900 truncate">{c.name}</div>}
+              <div className="text-[10px] text-slate-400 mt-0.5 truncate">{c.id}</div>
             </div>
-
-            {isExpanded && <div className="px-4 sm:px-6 pb-6 bg-slate-50/60">
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
-                {isEditing ? <div className="space-y-6">
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <Field label="Nome / Razão social"><input className="input" value={companyForm.name} onChange={e => setCompanyForm(f => ({...f, name:e.target.value}))}/></Field>
-                    <Field label="CNPJ"><input className="input" value={companyForm.cnpj} onChange={e => setCompanyForm(f => ({...f, cnpj:e.target.value}))}/></Field>
-                    <div className="md:col-span-2"><Field label="Plano de pagamento"><input className="input" placeholder="Ex.: 30% entrada + 10x no cartão" value={companyForm.paymentPlan} onChange={e => setCompanyForm(f => ({...f, paymentPlan:e.target.value}))}/></Field></div>
-                  </div>
-
-                  <div className="border-t border-slate-100 pt-5">
-                    <p className="text-sm text-slate-600 mb-4">Usuários vinculados</p>
-                    {linkedUsers.length === 0 ? <p className="text-sm text-slate-400">Nenhum acesso cadastrado para esta empresa.</p> :
-                      <div className="grid md:grid-cols-2 gap-4">{linkedUsers.map(u => <div key={u.id} className="rounded-2xl bg-slate-50 p-4 border border-slate-100"><Field label="Nome do usuário"><input className="input" value={userDrafts[u.id] ?? u.name ?? ''} onChange={e => setUserDrafts(d => ({...d, [u.id]:e.target.value}))}/></Field><div className="text-xs text-slate-400 mt-3">E-mail de login: {u.email || '—'}</div></div>)}</div>}
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row gap-2 sm:justify-between border-t border-slate-100 pt-5">
-                    <button onClick={() => remove(c.id)} className="btn-secondary text-red-600">Excluir cliente</button>
-                    <div className="flex gap-2"><button onClick={() => setEditingId(null)} className="btn-secondary">Cancelar</button><button disabled={saving} onClick={() => save(c)} className="btn-primary">{saving ? 'Salvando...' : 'Salvar alterações'}</button></div>
-                  </div>
-                </div> : <div className="grid lg:grid-cols-4 gap-5">
-                  <div><p className="text-[11px] uppercase tracking-wider text-slate-400">Cadastro</p><div className="mt-3 space-y-2 text-sm"><InfoLine label="Empresa" value={c.name}/><InfoLine label="CNPJ" value={c.cnpj || 'Não informado'}/><InfoLine label="ID LS" value={c.id}/><InfoLine label="Plano" value={c.paymentPlan || 'Não definido'}/></div></div>
-                  <div><p className="text-[11px] uppercase tracking-wider text-slate-400">Acessos</p><div className="mt-3 space-y-3">{linkedUsers.length ? linkedUsers.map(u => <div key={u.id}><div className="text-sm text-slate-700">{u.name}</div><div className="text-xs text-slate-400">{u.email}</div></div>) : <div className="text-sm text-slate-400">Nenhum usuário.</div>}</div></div>
-                  <div><p className="text-[11px] uppercase tracking-wider text-slate-400">Operação</p><div className="mt-3 grid grid-cols-2 gap-2"><MiniStat label="Projetos" value={clientProjects.length}/><MiniStat label="Chamados" value={openTickets}/><MiniStat label="A receber" value={money(openAmount)}/><MiniStat label="Recebido" value={money(paidAmount)}/></div></div>
-                  <div><p className="text-[11px] uppercase tracking-wider text-slate-400">Desenvolvimentos</p><div className="mt-3 space-y-2">{clientProjects.length ? clientProjects.slice(0,4).map(p => <div key={p.id} className="text-sm"><div className="flex justify-between gap-2"><span className="truncate text-slate-700">{p.name}</span><span className="text-slate-400">{Number(p.progress || 0)}%</span></div><Progress value={p.progress}/></div>) : <div className="text-sm text-slate-400">Nenhum projeto.</div>}</div></div>
-                </div>}
-              </div>
-            </div>}
-          </div>;
-        })}
-
-        {filtered.length === 0 && <div className="p-10 text-center text-sm text-slate-400">Nenhum cliente encontrado.</div>}
-      </div>
+            {!isEditing&&<button onClick={()=>beginEdit(c)} className="mini-btn">Editar</button>}
+          </div>
+          <div className="grid grid-cols-2 gap-2 mt-3">
+            <div className="mini-card"><span>CNPJ</span>{isEditing?<input className="input compact-input mt-1" value={companyForm.cnpj} onChange={e=>setCompanyForm(f=>({...f,cnpj:e.target.value}))}/>:<b>{c.cnpj||'Não informado'}</b>}</div>
+            <div className="mini-card"><span>Responsável</span><b>{primary?.name||'Sem responsável'}</b></div>
+            <div className="mini-card"><span>Projetos</span><b>{clientProjects.length}</b></div>
+            <div className="mini-card"><span>Chamados</span><b>{openTickets}</b></div>
+            <div className="mini-card"><span>A receber</span><b>{money(openAmount)}</b></div>
+            <div className="mini-card"><span>Recebido</span><b>{money(paidAmount)}</b></div>
+          </div>
+          <div className="mini-card mt-2"><span>Plano de pagamento</span>{isEditing?<input className="input compact-input mt-1" value={companyForm.paymentPlan} onChange={e=>setCompanyForm(f=>({...f,paymentPlan:e.target.value}))}/>:<b>{c.paymentPlan||'Não definido'}</b>}</div>
+          <div className="mt-2 rounded-xl border border-slate-100 p-3">
+            <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Acessos</div>
+            {linkedUsers.length===0?<div className="text-[11px] text-slate-400">Nenhum usuário cadastrado.</div>:linkedUsers.map(u=><div key={u.id} className="py-1.5 first:pt-0 last:pb-0 border-b last:border-0 border-slate-100">
+              {isEditing?<input className="input compact-input" value={userDrafts[u.id]??u.name??''} onChange={e=>setUserDrafts(d=>({...d,[u.id]:e.target.value}))}/>:<div className="text-[11px] text-slate-700">{u.name}</div>}
+              <div className="text-[10px] text-slate-400 truncate mt-0.5">{u.email||'Sem e-mail'}</div>
+            </div>)}
+          </div>
+          {isEditing&&<div className="flex justify-between gap-2 mt-3 pt-3 border-t border-slate-100">
+            <button onClick={()=>remove(c.id)} className="mini-btn text-red-600">Excluir</button>
+            <div className="flex gap-2"><button onClick={()=>setEditingId(null)} className="mini-btn">Cancelar</button><button disabled={saving} onClick={()=>save(c)} className="mini-btn mini-btn-primary">{saving?'Salvando...':'Salvar'}</button></div>
+          </div>}
+        </article>;
+      })}
     </div>
+    {filtered.length===0&&<Empty title="Nenhum cliente encontrado" text="Tente outro termo de busca."/>}
   </div>;
 }
 
@@ -589,134 +552,40 @@ function AdminFinancial() {
   const [form,setForm]=useState({companyId:'',description:'',amount:'',dueDate:'',installments:1,customerPhone:'',paymentNotes:''});
   const [loading,setLoading]=useState(false);
   const [filter,setFilter]=useState('all');
-
-  const normalizeMoney=value=>{
-    const raw=String(value||'').trim();
-    const normalized=raw.includes(',')?raw.replace(/\./g,'').replace(',','.'):raw;
-    return Number(normalized);
-  };
-
-  const create=async e=>{
-    e.preventDefault();
-    const numericAmount=normalizeMoney(form.amount);
-    if(!Number.isFinite(numericAmount)||numericAmount<=0)return alert('Informe um valor válido.');
-    if(!form.customerPhone.trim())return alert('Informe o WhatsApp do cliente para o lembrete automático.');
-    setLoading(true);
-    try{
-      const total=Math.max(1,Number(form.installments||1));
-      const [y,m,d]=form.dueDate.split('-').map(Number);
-      const base=new Date(y,m-1,d,12,0,0);
-      const created=[];
-      for(let i=0;i<total;i++){
-        const due=new Date(base.getFullYear(),base.getMonth()+i,base.getDate(),12,0,0);
-        const yyyy=due.getFullYear();
-        const mm=String(due.getMonth()+1).padStart(2,'0');
-        const dd=String(due.getDate()).padStart(2,'0');
-        const item={
-          id:generateId('FIN'),
-          companyId:form.companyId,
-          description:total>1?`${form.description} ${i+1}/${total}`:form.description,
-          amount:numericAmount,
-          dueDate:`${yyyy}-${mm}-${dd}`,
-          status:'pending',
-          paymentMethod:'pix',
-          customerPhone:form.customerPhone.trim(),
-          paymentNotes:form.paymentNotes.trim()||null,
-          reminderSent:false,
-          reminderSentAt:null,
-          paidAt:null,
-        };
-        const r=await fetchSupabase('/rest/v1/financials',{method:'POST',body:JSON.stringify(item)});
-        if(r.error)throw new Error(r.error.message||'Erro ao criar cobrança.');
-        created.push(item);
-      }
-      setFinancials(x=>[...created,...x]);
-      setForm({companyId:'',description:'',amount:'',dueDate:'',installments:1,customerPhone:'',paymentNotes:''});
-    }catch(err){alert(err.message||'Erro ao criar cobrança.');}
-    finally{setLoading(false);}
-  };
-
-  const markPaid=async id=>{
-    const updates={status:'paid',paidAt:new Date().toISOString()};
-    const r=await fetchSupabase(`/rest/v1/financials?id=eq.${id}`,{method:'PATCH',body:JSON.stringify(updates)});
-    if(r.error)return alert(r.error.message||'Erro ao confirmar pagamento.');
-    setFinancials(x=>x.map(f=>f.id===id?{...f,...updates}:f));
-  };
-
-  const reopen=async id=>{
-    const updates={status:'pending',paidAt:null};
-    const r=await fetchSupabase(`/rest/v1/financials?id=eq.${id}`,{method:'PATCH',body:JSON.stringify(updates)});
-    if(r.error)return alert(r.error.message||'Erro ao reabrir cobrança.');
-    setFinancials(x=>x.map(f=>f.id===id?{...f,...updates}:f));
-  };
-
-  const resetReminder=async id=>{
-    const updates={reminderSent:false,reminderSentAt:null};
-    const r=await fetchSupabase(`/rest/v1/financials?id=eq.${id}`,{method:'PATCH',body:JSON.stringify(updates)});
-    if(r.error)return alert(r.error.message||'Erro ao liberar novo lembrete.');
-    setFinancials(x=>x.map(f=>f.id===id?{...f,...updates}:f));
-  };
-
+  const [editingId,setEditingId]=useState(null);
+  const [editForm,setEditForm]=useState({});
+  const normalizeMoney=value=>{const raw=String(value||'').trim();const normalized=raw.includes(',')?raw.replace(/\./g,'').replace(',','.'):raw;return Number(normalized);};
+  const create=async e=>{e.preventDefault();const numericAmount=normalizeMoney(form.amount);if(!Number.isFinite(numericAmount)||numericAmount<=0)return alert('Informe um valor válido.');if(!form.customerPhone.trim())return alert('Informe o WhatsApp do cliente.');setLoading(true);try{const total=Math.max(1,Number(form.installments||1));const [y,m,d]=form.dueDate.split('-').map(Number);const base=new Date(y,m-1,d,12);const created=[];for(let i=0;i<total;i++){const due=new Date(base.getFullYear(),base.getMonth()+i,base.getDate(),12);const item={id:generateId('FIN'),companyId:form.companyId,description:total>1?`${form.description} ${i+1}/${total}`:form.description,amount:numericAmount,dueDate:`${due.getFullYear()}-${String(due.getMonth()+1).padStart(2,'0')}-${String(due.getDate()).padStart(2,'0')}`,status:'pending',paymentMethod:'pix',customerPhone:form.customerPhone.trim(),paymentNotes:form.paymentNotes.trim()||null,reminderSent:false,reminderSentAt:null,paidAt:null};const r=await fetchSupabase('/rest/v1/financials',{method:'POST',body:JSON.stringify(item)});if(r.error)throw new Error(r.error.message||'Erro ao criar cobrança.');created.push(item);}setFinancials(x=>[...created,...x]);setForm({companyId:'',description:'',amount:'',dueDate:'',installments:1,customerPhone:'',paymentNotes:''});}catch(err){alert(err.message||'Erro ao criar cobrança.');}finally{setLoading(false);}};
+  const markPaid=async id=>{const updates={status:'paid',paidAt:new Date().toISOString()};const r=await fetchSupabase(`/rest/v1/financials?id=eq.${id}`,{method:'PATCH',body:JSON.stringify(updates)});if(r.error)return alert('Erro ao confirmar pagamento.');setFinancials(x=>x.map(f=>f.id===id?{...f,...updates}:f));};
+  const reopen=async id=>{const updates={status:'pending',paidAt:null};const r=await fetchSupabase(`/rest/v1/financials?id=eq.${id}`,{method:'PATCH',body:JSON.stringify(updates)});if(r.error)return alert('Erro ao reabrir cobrança.');setFinancials(x=>x.map(f=>f.id===id?{...f,...updates}:f));};
+  const resetReminder=async id=>{const updates={reminderSent:false,reminderSentAt:null};const r=await fetchSupabase(`/rest/v1/financials?id=eq.${id}`,{method:'PATCH',body:JSON.stringify(updates)});if(r.error)return alert('Erro ao liberar lembrete.');setFinancials(x=>x.map(f=>f.id===id?{...f,...updates}:f));};
+  const beginEdit=f=>{setEditingId(f.id);setEditForm({companyId:f.companyId||'',description:f.description||'',amount:String(f.amount||''),dueDate:String(f.dueDate||'').slice(0,10),customerPhone:f.customerPhone||'',paymentNotes:f.paymentNotes||''});};
+  const saveEdit=async id=>{const amount=normalizeMoney(editForm.amount);if(!Number.isFinite(amount)||amount<=0)return alert('Valor inválido.');setLoading(true);const updates={...editForm,amount,customerPhone:String(editForm.customerPhone||'').replace(/\D/g,''),paymentNotes:editForm.paymentNotes||null};const r=await fetchSupabase(`/rest/v1/financials?id=eq.${id}`,{method:'PATCH',body:JSON.stringify(updates)});setLoading(false);if(r.error)return alert(r.error.message||'Erro ao editar cobrança.');setFinancials(x=>x.map(f=>f.id===id?{...f,...updates}:f));setEditingId(null);};
   const isOverdue=f=>f.status==='pending'&&f.dueDate&&new Date(`${f.dueDate}T23:59:59`)<new Date();
-  const rows=financials.filter(f=>{
-    if(filter==='all')return true;
-    if(filter==='overdue')return isOverdue(f);
-    return f.status===filter;
-  }).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
-  const pending=financials.filter(f=>f.status==='pending').reduce((sum,f)=>sum+Number(f.amount||0),0);
-  const paid=financials.filter(f=>f.status==='paid').reduce((sum,f)=>sum+Number(f.amount||0),0);
-  const overdueCount=financials.filter(isOverdue).length;
-
-  return <div className="space-y-7">
-    <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-      <div><h2 className="page-title">Financeiro</h2><p className="page-subtitle">Cadastre cobranças PIX. O n8n usará vencimento e WhatsApp para enviar os lembretes.</p></div>
-      <div className="text-sm text-slate-500 bg-white border border-slate-200 rounded-xl px-4 py-3">
-        PIX configurado: <span className="text-slate-900">{financialSettings?.pix_key?'Sim':'Não'}</span>
-      </div>
-    </div>
-
-    <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
-      <Metric icon={WalletCards} label="A receber" value={money(pending)}/>
-      <Metric icon={CheckCircle2} label="Recebido" value={money(paid)}/>
-      <Metric icon={AlertCircle} label="Vencidas" value={overdueCount}/>
-      <Metric icon={Bell} label="Lembretes enviados" value={financials.filter(f=>f.reminderSent).length}/>
-    </div>
-
-    <form onSubmit={create} className="card p-5 sm:p-6 grid md:grid-cols-2 xl:grid-cols-4 gap-4">
-      <Field label="Cliente"><select className="input" value={form.companyId} onChange={e=>setForm({...form,companyId:e.target.value})} required><option value="">Selecione...</option>{companies.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
-      <Field label="Descrição"><input className="input" placeholder="Ex: Parcela desenvolvimento" value={form.description} onChange={e=>setForm({...form,description:e.target.value})} required/></Field>
-      <Field label="Valor"><input className="input" inputMode="decimal" placeholder="Ex: 490,00" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} required/></Field>
-      <Field label="1º vencimento"><input className="input" type="date" value={form.dueDate} onChange={e=>setForm({...form,dueDate:e.target.value})} required/></Field>
-      <Field label="Quantidade de parcelas"><input className="input" type="number" min="1" max="36" value={form.installments} onChange={e=>setForm({...form,installments:e.target.value})}/></Field>
-      <Field label="WhatsApp para lembrete"><input className="input" inputMode="tel" placeholder="5511999999999" value={form.customerPhone} onChange={e=>setForm({...form,customerPhone:e.target.value.replace(/\D/g,'')})} required/></Field>
-      <div className="md:col-span-2"><Field label="Observação opcional"><input className="input" placeholder="Ex: Referente ao desenvolvimento do CRM" value={form.paymentNotes} onChange={e=>setForm({...form,paymentNotes:e.target.value})}/></Field></div>
-      <div className="md:col-span-2 xl:col-span-4 flex flex-wrap items-center gap-3">
-        <button className="btn-primary" disabled={loading}>{loading?'Criando...':'Gerar cobrança'}</button>
-        <span className="text-xs text-slate-400">O n8n enviará somente cobranças pendentes com lembrete ainda não enviado.</span>
-      </div>
+  const rows=financials.filter(f=>filter==='all'?true:filter==='overdue'?isOverdue(f):f.status===filter).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
+  const pending=financials.filter(f=>f.status==='pending').reduce((s,f)=>s+Number(f.amount||0),0), paid=financials.filter(f=>f.status==='paid').reduce((s,f)=>s+Number(f.amount||0),0), overdueCount=financials.filter(isOverdue).length;
+  return <div className="space-y-4">
+    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3"><div><h2 className="page-title">Financeiro</h2><p className="page-subtitle">Cobranças PIX em cards compactos, editáveis e preparados para o n8n.</p></div><div className="text-[11px] text-slate-500 bg-white border border-slate-200 rounded-xl px-3 py-2">PIX: <span className="text-slate-900">{financialSettings?.pix_key?'configurado':'não configurado'}</span></div></div>
+    <div className="grid grid-cols-2 xl:grid-cols-4 gap-2"><Metric icon={WalletCards} label="A receber" value={money(pending)}/><Metric icon={CheckCircle2} label="Recebido" value={money(paid)}/><Metric icon={AlertCircle} label="Vencidas" value={overdueCount}/><Metric icon={Bell} label="Lembretes" value={financials.filter(f=>f.reminderSent).length}/></div>
+    <form onSubmit={create} className="card compact-card p-4 grid sm:grid-cols-2 xl:grid-cols-4 gap-3">
+      <Field label="Cliente"><select className="input compact-input" value={form.companyId} onChange={e=>setForm({...form,companyId:e.target.value})} required><option value="">Selecione...</option>{companies.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
+      <Field label="Descrição"><input className="input compact-input" value={form.description} onChange={e=>setForm({...form,description:e.target.value})} required/></Field>
+      <Field label="Valor"><input className="input compact-input" inputMode="decimal" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} required/></Field>
+      <Field label="1º vencimento"><input className="input compact-input" type="date" value={form.dueDate} onChange={e=>setForm({...form,dueDate:e.target.value})} required/></Field>
+      <Field label="Parcelas"><input className="input compact-input" type="number" min="1" max="36" value={form.installments} onChange={e=>setForm({...form,installments:e.target.value})}/></Field>
+      <Field label="WhatsApp"><input className="input compact-input" inputMode="tel" value={form.customerPhone} onChange={e=>setForm({...form,customerPhone:e.target.value.replace(/\D/g,'')})} required/></Field>
+      <div className="sm:col-span-2"><Field label="Observação"><input className="input compact-input" value={form.paymentNotes} onChange={e=>setForm({...form,paymentNotes:e.target.value})}/></Field></div>
+      <div className="sm:col-span-2 xl:col-span-4"><button className="mini-btn mini-btn-primary" disabled={loading}>{loading?'Criando...':'Gerar cobrança'}</button></div>
     </form>
-
-    <div className="flex gap-2 flex-wrap">{['all','pending','overdue','paid'].map(x=><button key={x} onClick={()=>setFilter(x)} className={`px-4 py-2 rounded-xl text-sm font-normal ${filter===x?'bg-slate-950 text-white':'bg-white border border-slate-200'}`}>{x==='all'?'Todas':x==='pending'?'Pendentes':x==='overdue'?'Vencidas':'Pagas'}</button>)}</div>
-
-    <div className="space-y-3">{rows.length?rows.map(f=>{
-      const overdue=isOverdue(f);
-      return <div key={f.id} className="card p-4 sm:p-5">
-        <div className="flex flex-col xl:flex-row xl:items-center gap-4">
-          <div className="flex-1 min-w-0">
-            <div className="font-normal text-slate-950">{companies.find(c=>c.id===f.companyId)?.name||'Cliente'}</div>
-            <div className="text-sm text-slate-500 mt-1">{f.description} • Vence {dateBR(f.dueDate)}</div>
-            <div className="text-xs text-slate-400 mt-2">WhatsApp: {f.customerPhone||'Não informado'}{f.paymentNotes?` • ${f.paymentNotes}`:''}</div>
-          </div>
-          <div className="text-xl font-normal">{money(f.amount)}</div>
-          {overdue?<span className="status status-warn">Vencida</span>:<PaymentStatus status={f.status}/>} 
-          <div className="text-xs text-slate-500 xl:w-40">{f.reminderSent?<><span className="text-emerald-700">Lembrete enviado</span><br/>{f.reminderSentAt&&new Date(f.reminderSentAt).toLocaleString('pt-BR')}</>:<span>Aguardando automação</span>}</div>
-          <div className="flex flex-wrap gap-2">
-            {f.status!=='paid'?<button onClick={()=>markPaid(f.id)} className="btn-dark">Marcar pago</button>:<button onClick={()=>reopen(f.id)} className="btn-secondary">Reabrir</button>}
-            {f.reminderSent&&f.status!=='paid'&&<button onClick={()=>resetReminder(f.id)} className="btn-secondary">Liberar lembrete</button>}
-          </div>
-        </div>
-      </div>
-    }):<Empty title="Nenhuma cobrança" text="Não há cobranças neste filtro."/>}</div>
+    <div className="flex gap-1.5 flex-wrap">{['all','pending','overdue','paid'].map(x=><button key={x} onClick={()=>setFilter(x)} className={`mini-btn ${filter===x?'mini-btn-primary':''}`}>{x==='all'?'Todas':x==='pending'?'Pendentes':x==='overdue'?'Vencidas':'Pagas'}</button>)}</div>
+    <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-3">{rows.length?rows.map(f=>{const overdue=isOverdue(f),editing=editingId===f.id;return <article key={f.id} className="card compact-card p-4">
+      <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="text-[12px] text-slate-900 truncate">{companies.find(c=>c.id===f.companyId)?.name||'Cliente'}</div><div className="text-[10px] text-slate-400 mt-0.5">{f.id}</div></div>{!editing&&<button onClick={()=>beginEdit(f)} className="mini-btn">Editar</button>}</div>
+      {editing?<div className="grid grid-cols-2 gap-2 mt-3"><div className="col-span-2"><Field label="Cliente"><select className="input compact-input" value={editForm.companyId} onChange={e=>setEditForm({...editForm,companyId:e.target.value})}>{companies.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></Field></div><div className="col-span-2"><Field label="Descrição"><input className="input compact-input" value={editForm.description} onChange={e=>setEditForm({...editForm,description:e.target.value})}/></Field></div><Field label="Valor"><input className="input compact-input" value={editForm.amount} onChange={e=>setEditForm({...editForm,amount:e.target.value})}/></Field><Field label="Vencimento"><input type="date" className="input compact-input" value={editForm.dueDate} onChange={e=>setEditForm({...editForm,dueDate:e.target.value})}/></Field><div className="col-span-2"><Field label="WhatsApp"><input className="input compact-input" value={editForm.customerPhone} onChange={e=>setEditForm({...editForm,customerPhone:e.target.value})}/></Field></div><div className="col-span-2"><Field label="Observação"><input className="input compact-input" value={editForm.paymentNotes} onChange={e=>setEditForm({...editForm,paymentNotes:e.target.value})}/></Field></div></div>:<>
+        <div className="grid grid-cols-2 gap-2 mt-3"><div className="mini-card"><span>Descrição</span><b>{f.description}</b></div><div className="mini-card"><span>Valor</span><b>{money(f.amount)}</b></div><div className="mini-card"><span>Vencimento</span><b>{dateBR(f.dueDate)}</b></div><div className="mini-card"><span>Status</span><b>{overdue?'Vencida':f.status==='paid'?'Paga':'Pendente'}</b></div><div className="mini-card"><span>WhatsApp</span><b>{f.customerPhone||'—'}</b></div><div className="mini-card"><span>Lembrete</span><b>{f.reminderSent?'Enviado':'Pendente'}</b></div></div>
+        {f.paymentNotes&&<div className="mini-card mt-2"><span>Observação</span><b>{f.paymentNotes}</b></div>}
+      </>}
+      <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-slate-100">{editing?<><button onClick={()=>setEditingId(null)} className="mini-btn">Cancelar</button><button disabled={loading} onClick={()=>saveEdit(f.id)} className="mini-btn mini-btn-primary">Salvar</button></>:<>{f.status!=='paid'?<button onClick={()=>markPaid(f.id)} className="mini-btn mini-btn-primary">Marcar pago</button>:<button onClick={()=>reopen(f.id)} className="mini-btn">Reabrir</button>}{f.reminderSent&&f.status!=='paid'&&<button onClick={()=>resetReminder(f.id)} className="mini-btn">Liberar lembrete</button>}</>}</div>
+    </article>}):<Empty title="Nenhuma cobrança" text="Não há cobranças neste filtro."/>}</div>
   </div>;
 }
 
@@ -848,15 +717,28 @@ function Notice({type='info',children}){const cls=type==='error'?'bg-red-50 text
 function Empty({title,text}){return <div className="card p-12 text-center"><div className="w-14 h-14 mx-auto rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400"><BriefcaseBusiness/></div><h3 className="font-normal mt-4">{title}</h3><p className="text-sm text-slate-500 mt-1">{text}</p></div>}
 
 function GlobalStyles(){return <style>{`
-  .card{background:white;border:1px solid rgb(226 232 240);border-radius:22px;box-shadow:0 12px 36px rgba(15,23,42,.045)}
-  .input{width:100%;border:1px solid rgb(203 213 225);background:white;border-radius:12px;padding:.72rem .85rem;outline:none;transition:.2s;color:rgb(15 23 42)}
-  .input:focus{border-color:rgb(59 130 246);box-shadow:0 0 0 4px rgba(59,130,246,.1)}
-  .btn-primary,.btn-dark,.btn-secondary{display:inline-flex;align-items:center;justify-content:center;gap:.45rem;border-radius:12px;padding:.72rem 1rem;font-size:.875rem;font-weight:400;transition:.2s}
-  .btn-primary{background:linear-gradient(135deg,#2563eb,#4f46e5);color:white;box-shadow:0 10px 20px rgba(37,99,235,.18)}
+  .portal-ui{font-size:12.5px}
+  .portal-ui .text-3xl{font-size:1.35rem!important;line-height:1.7rem!important}
+  .portal-ui .text-2xl{font-size:1.15rem!important;line-height:1.5rem!important}
+  .portal-ui .text-xl{font-size:1rem!important;line-height:1.35rem!important}
+  .portal-ui .text-lg{font-size:.9rem!important;line-height:1.25rem!important}
+  .portal-ui .text-sm{font-size:.76rem!important;line-height:1.05rem!important}
+  .card{background:white;border:1px solid rgb(226 232 240);border-radius:16px;box-shadow:0 7px 24px rgba(15,23,42,.035)}
+  .compact-card{box-shadow:0 4px 14px rgba(15,23,42,.025)}
+  .input{width:100%;border:1px solid rgb(203 213 225);background:white;border-radius:10px;padding:.58rem .7rem;outline:none;transition:.2s;color:rgb(15 23 42);font-size:.76rem}
+  .compact-input{padding:.48rem .6rem;font-size:.72rem;border-radius:9px}
+  .input:focus{border-color:rgb(59 130 246);box-shadow:0 0 0 3px rgba(59,130,246,.08)}
+  .btn-primary,.btn-dark,.btn-secondary{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border-radius:10px;padding:.56rem .78rem;font-size:.74rem;font-weight:400;transition:.2s}
+  .btn-primary{background:linear-gradient(135deg,#2563eb,#4f46e5);color:white;box-shadow:0 7px 14px rgba(37,99,235,.14)}
   .btn-primary:hover{filter:brightness(.95)} .btn-primary:disabled{opacity:.55}
   .btn-dark{background:#0f172a;color:white}.btn-secondary{background:white;border:1px solid #cbd5e1;color:#334155}
-  .page-title{font-size:1.8rem;line-height:2.2rem;font-weight:400;letter-spacing:-.03em;color:#0f172a}.page-subtitle{color:#64748b;margin-top:.25rem}
-  .status{display:inline-flex;align-items:center;justify-content:center;padding:.34rem .65rem;border-radius:999px;font-size:.68rem;font-weight:400;white-space:nowrap}
+  .mini-btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid #e2e8f0;background:white;color:#475569;border-radius:8px;padding:.38rem .58rem;font-size:.66rem;line-height:1;transition:.2s}
+  .mini-btn:hover{background:#f8fafc}.mini-btn-primary{background:#0f172a;color:white;border-color:#0f172a}.mini-btn-primary:hover{background:#1e293b}
+  .mini-card{background:#f8fafc;border:1px solid #f1f5f9;border-radius:10px;padding:.55rem .65rem;min-width:0}
+  .mini-card span{display:block;font-size:.58rem;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:.18rem}
+  .mini-card b{display:block;font-size:.7rem;line-height:1rem;font-weight:400;color:#334155;overflow-wrap:anywhere}
+  .page-title{font-size:1.25rem;line-height:1.55rem;font-weight:400;letter-spacing:-.025em;color:#0f172a}.page-subtitle{font-size:.72rem;color:#64748b;margin-top:.12rem}
+  .status{display:inline-flex;align-items:center;justify-content:center;padding:.28rem .52rem;border-radius:999px;font-size:.61rem;font-weight:400;white-space:nowrap}
   .status-ok{background:#dcfce7;color:#15803d}.status-warn{background:#fff7ed;color:#c2410c}.status-info{background:#eff6ff;color:#1d4ed8}.status-muted{background:#f1f5f9;color:#64748b}
-  @media(max-width:640px){.page-title{font-size:1.55rem}.card{border-radius:18px}}
+  @media(max-width:640px){.portal-ui{font-size:12px}.page-title{font-size:1.15rem}.card{border-radius:14px}}
 `}</style>}
