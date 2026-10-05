@@ -548,11 +548,21 @@ function AdminProjects() {
 }
 
 function AdminFinancial() {
-  const { financials, setFinancials, companies, fetchSupabase, generateId, financialSettings } = useContext(AppContext);
+  const {
+    financials,
+    setFinancials,
+    companies,
+    setCompanies,
+    fetchSupabase,
+    generateId,
+    financialSettings
+  } = useContext(AppContext);
 
   const [form, setForm] = useState({
     companyId: '',
     description: '',
+    developmentAmount: '',
+    developmentPaidAmount: '',
     amount: '',
     dueDate: '',
     installments: 1,
@@ -579,13 +589,50 @@ function AdminFinancial() {
       .replace(/\s*\(?\d+\s*\/\s*\d+\)?\s*$/i, '')
       .trim();
 
+  const makeDueDate = (baseDateString, offset) => {
+    const [y, m, d] = String(baseDateString).split('-').map(Number);
+    const base = new Date(y, m - 1, d, 12);
+    const due = new Date(base.getFullYear(), base.getMonth() + offset, base.getDate(), 12);
+    return `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`;
+  };
+
+  const updateCompanyFinancialData = async (companyId, developmentAmount, developmentPaidAmount) => {
+    const updates = {
+      developmentAmount,
+      developmentPaidAmount
+    };
+
+    const r = await fetchSupabase(`/rest/v1/companies?id=eq.${companyId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates)
+    });
+
+    if (r.error) {
+      throw new Error(r.error.message || 'Erro ao atualizar os dados financeiros do cliente.');
+    }
+
+    setCompanies(current =>
+      current.map(c => c.id === companyId ? { ...c, ...updates } : c)
+    );
+  };
+
   const create = async e => {
     e.preventDefault();
 
     const numericAmount = normalizeMoney(form.amount);
+    const developmentAmount = normalizeMoney(form.developmentAmount || 0);
+    const developmentPaidAmount = normalizeMoney(form.developmentPaidAmount || 0);
 
     if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      return alert('Informe um valor válido.');
+      return alert('Informe um valor válido para a parcela.');
+    }
+
+    if (!Number.isFinite(developmentAmount) || developmentAmount < 0) {
+      return alert('Informe um valor válido para o desenvolvimento.');
+    }
+
+    if (!Number.isFinite(developmentPaidAmount) || developmentPaidAmount < 0) {
+      return alert('Informe quanto do desenvolvimento já foi pago.');
     }
 
     if (!form.customerPhone.trim()) {
@@ -596,18 +643,15 @@ function AdminFinancial() {
 
     try {
       const total = Math.max(1, Number(form.installments || 1));
-      const [y, m, d] = form.dueDate.split('-').map(Number);
-      const base = new Date(y, m - 1, d, 12);
       const created = [];
 
-      for (let i = 0; i < total; i++) {
-        const due = new Date(
-          base.getFullYear(),
-          base.getMonth() + i,
-          base.getDate(),
-          12
-        );
+      await updateCompanyFinancialData(
+        form.companyId,
+        developmentAmount,
+        developmentPaidAmount
+      );
 
+      for (let i = 0; i < total; i++) {
         const item = {
           id: generateId('FIN'),
           companyId: form.companyId,
@@ -616,7 +660,7 @@ function AdminFinancial() {
               ? `${form.description.trim()} ${i + 1}/${total}`
               : form.description.trim(),
           amount: numericAmount,
-          dueDate: `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`,
+          dueDate: makeDueDate(form.dueDate, i),
           status: 'pending',
           paymentMethod: 'pix',
           customerPhone: form.customerPhone.replace(/\D/g, ''),
@@ -631,10 +675,7 @@ function AdminFinancial() {
           body: JSON.stringify(item)
         });
 
-        if (r.error) {
-          throw new Error(r.error.message || 'Erro ao criar cobrança.');
-        }
-
+        if (r.error) throw new Error(r.error.message || 'Erro ao criar cobrança.');
         created.push(item);
       }
 
@@ -643,6 +684,8 @@ function AdminFinancial() {
       setForm({
         companyId: '',
         description: '',
+        developmentAmount: '',
+        developmentPaidAmount: '',
         amount: '',
         dueDate: '',
         installments: 1,
@@ -650,7 +693,7 @@ function AdminFinancial() {
         paymentNotes: ''
       });
     } catch (err) {
-      alert(err.message || 'Erro ao criar cobrança.');
+      alert(err.message || 'Erro ao criar o plano financeiro.');
     } finally {
       setLoading(false);
     }
@@ -707,6 +750,23 @@ function AdminFinancial() {
     );
   };
 
+  const updateInstallment = async (id, updates) => {
+    const r = await fetchSupabase(`/rest/v1/financials?id=eq.${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates)
+    });
+
+    if (r.error) {
+      alert(r.error.message || 'Erro ao atualizar a parcela.');
+      return false;
+    }
+
+    setFinancials(current =>
+      current.map(f => f.id === id ? { ...f, ...updates } : f)
+    );
+    return true;
+  };
+
   const isOverdue = f =>
     f.status === 'pending' &&
     f.dueDate &&
@@ -725,12 +785,12 @@ function AdminFinancial() {
       const overdueItems = pendingItems.filter(isOverdue);
       const nextPending = pendingItems[0] || null;
 
-      const totalAmount = items.reduce(
+      const installmentsTotal = items.reduce(
         (sum, f) => sum + Number(f.amount || 0),
         0
       );
 
-      const paidAmount = paidItems.reduce(
+      const installmentsPaidAmount = paidItems.reduce(
         (sum, f) => sum + Number(f.amount || 0),
         0
       );
@@ -754,19 +814,15 @@ function AdminFinancial() {
         pendingItems,
         overdueItems,
         nextPending,
-        totalAmount,
-        paidAmount,
+        installmentsTotal,
+        installmentsPaidAmount,
         pendingAmount,
         progress,
+        developmentAmount: Number(company.developmentAmount || 0),
+        developmentPaidAmount: Number(company.developmentPaidAmount || 0),
         description: cleanDescription(first?.description),
-        phone:
-          nextPending?.customerPhone ||
-          first?.customerPhone ||
-          '',
-        notes:
-          nextPending?.paymentNotes ||
-          first?.paymentNotes ||
-          ''
+        phone: nextPending?.customerPhone || first?.customerPhone || '',
+        notes: nextPending?.paymentNotes || first?.paymentNotes || ''
       };
     })
     .filter(Boolean)
@@ -791,7 +847,11 @@ function AdminFinancial() {
     setEditingCompanyId(group.company.id);
     setGroupEdit({
       description: group.description || '',
+      developmentAmount: String(group.developmentAmount || 0),
+      developmentPaidAmount: String(group.developmentPaidAmount || 0),
+      installments: String(group.items.length || 1),
       amount: String(group.nextPending?.amount ?? group.first?.amount ?? ''),
+      firstDueDate: group.first?.dueDate || '',
       customerPhone: group.phone || '',
       paymentNotes: group.notes || ''
     });
@@ -799,55 +859,125 @@ function AdminFinancial() {
 
   const saveGroupEdit = async group => {
     const amount = normalizeMoney(groupEdit.amount);
+    const developmentAmount = normalizeMoney(groupEdit.developmentAmount || 0);
+    const developmentPaidAmount = normalizeMoney(groupEdit.developmentPaidAmount || 0);
+    const desiredCount = Math.max(1, Number(groupEdit.installments || 1));
 
     if (!Number.isFinite(amount) || amount <= 0) {
-      return alert('Informe um valor válido.');
+      return alert('Informe um valor válido para a parcela.');
+    }
+
+    if (!Number.isFinite(developmentAmount) || developmentAmount < 0) {
+      return alert('Informe um valor válido para o desenvolvimento.');
+    }
+
+    if (!Number.isFinite(developmentPaidAmount) || developmentPaidAmount < 0) {
+      return alert('Informe um valor válido para o desenvolvimento já pago.');
+    }
+
+    if (!groupEdit.firstDueDate) {
+      return alert('Informe a data do primeiro vencimento.');
     }
 
     setLoading(true);
 
     try {
-      const ordered = [...group.items].sort(
+      await updateCompanyFinancialData(
+        group.company.id,
+        developmentAmount,
+        developmentPaidAmount
+      );
+
+      const currentItems = [...group.items].sort(
         (a, b) => new Date(a.dueDate) - new Date(b.dueDate)
       );
 
-      const total = ordered.length;
+      if (desiredCount < currentItems.length) {
+        const toDelete = currentItems.slice(desiredCount);
 
-      for (let index = 0; index < ordered.length; index++) {
-        const item = ordered[index];
+        if (toDelete.some(item => item.status === 'paid')) {
+          throw new Error(
+            'Não é possível reduzir a quantidade de parcelas removendo uma parcela já paga. Reabra a parcela antes, se realmente precisar alterar o plano.'
+          );
+        }
 
+        for (const item of toDelete) {
+          const r = await fetchSupabase(`/rest/v1/financials?id=eq.${item.id}`, {
+            method: 'DELETE'
+          });
+
+          if (r.error) throw new Error(r.error.message || 'Erro ao remover parcela.');
+        }
+
+        setFinancials(current =>
+          current.filter(f => !toDelete.some(item => item.id === f.id))
+        );
+      }
+
+      const remainingItems = currentItems.slice(0, Math.min(desiredCount, currentItems.length));
+
+      for (let index = 0; index < remainingItems.length; index++) {
+        const item = remainingItems[index];
         const updates = {
           description:
-            total > 1
-              ? `${groupEdit.description.trim()} ${index + 1}/${total}`
+            desiredCount > 1
+              ? `${groupEdit.description.trim()} ${index + 1}/${desiredCount}`
               : groupEdit.description.trim(),
           amount,
+          dueDate: makeDueDate(groupEdit.firstDueDate, index),
           customerPhone: String(groupEdit.customerPhone || '').replace(/\D/g, ''),
           paymentNotes: groupEdit.paymentNotes.trim() || null
         };
 
-        const r = await fetchSupabase(
-          `/rest/v1/financials?id=eq.${item.id}`,
-          {
-            method: 'PATCH',
-            body: JSON.stringify(updates)
-          }
-        );
+        const r = await fetchSupabase(`/rest/v1/financials?id=eq.${item.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(updates)
+        });
 
-        if (r.error) {
-          throw new Error(r.error.message || 'Erro ao salvar informações.');
-        }
+        if (r.error) throw new Error(r.error.message || 'Erro ao atualizar parcela.');
 
         setFinancials(current =>
-          current.map(f =>
-            f.id === item.id ? { ...f, ...updates } : f
-          )
+          current.map(f => f.id === item.id ? { ...f, ...updates } : f)
         );
+      }
+
+      if (desiredCount > currentItems.length) {
+        const created = [];
+
+        for (let index = currentItems.length; index < desiredCount; index++) {
+          const item = {
+            id: generateId('FIN'),
+            companyId: group.company.id,
+            description:
+              desiredCount > 1
+                ? `${groupEdit.description.trim()} ${index + 1}/${desiredCount}`
+                : groupEdit.description.trim(),
+            amount,
+            dueDate: makeDueDate(groupEdit.firstDueDate, index),
+            status: 'pending',
+            paymentMethod: 'pix',
+            customerPhone: String(groupEdit.customerPhone || '').replace(/\D/g, ''),
+            paymentNotes: groupEdit.paymentNotes.trim() || null,
+            reminderSent: false,
+            reminderSentAt: null,
+            paidAt: null
+          };
+
+          const r = await fetchSupabase('/rest/v1/financials', {
+            method: 'POST',
+            body: JSON.stringify(item)
+          });
+
+          if (r.error) throw new Error(r.error.message || 'Erro ao criar nova parcela.');
+          created.push(item);
+        }
+
+        setFinancials(current => [...current, ...created]);
       }
 
       setEditingCompanyId(null);
     } catch (err) {
-      alert(err.message || 'Erro ao atualizar cobrança.');
+      alert(err.message || 'Erro ao atualizar o financeiro do cliente.');
     } finally {
       setLoading(false);
     }
@@ -864,7 +994,7 @@ function AdminFinancial() {
         <div>
           <h2 className="page-title">Financeiro</h2>
           <p className="page-subtitle">
-            Um resumo financeiro por cliente, com todas as parcelas no mesmo card.
+            Um card por cliente, com todo o plano financeiro centralizado.
           </p>
         </div>
 
@@ -878,7 +1008,7 @@ function AdminFinancial() {
 
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
         <Metric icon={WalletCards} label="A receber" value={money(pendingTotal)} />
-        <Metric icon={CheckCircle2} label="Recebido" value={money(paidTotal)} />
+        <Metric icon={CheckCircle2} label="Recebido em parcelas" value={money(paidTotal)} />
         <Metric icon={AlertCircle} label="Vencidas" value={overdueCount} />
         <Metric icon={Users} label="Clientes" value={groups.length} />
       </div>
@@ -896,9 +1026,7 @@ function AdminFinancial() {
           >
             <option value="">Selecione...</option>
             {companies.map(c => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
+              <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
         </Field>
@@ -910,6 +1038,37 @@ function AdminFinancial() {
             onChange={e => setForm({ ...form, description: e.target.value })}
             placeholder="Ex: Sistema + mensalidade"
             required
+          />
+        </Field>
+
+        <Field label="Valor do desenvolvimento">
+          <input
+            className="input compact-input"
+            inputMode="decimal"
+            value={form.developmentAmount}
+            onChange={e => setForm({ ...form, developmentAmount: e.target.value })}
+            placeholder="Ex: 7000"
+          />
+        </Field>
+
+        <Field label="Desenvolvimento já pago">
+          <input
+            className="input compact-input"
+            inputMode="decimal"
+            value={form.developmentPaidAmount}
+            onChange={e => setForm({ ...form, developmentPaidAmount: e.target.value })}
+            placeholder="Ex: 2100"
+          />
+        </Field>
+
+        <Field label="Quantidade de parcelas">
+          <input
+            className="input compact-input"
+            type="number"
+            min="1"
+            max="60"
+            value={form.installments}
+            onChange={e => setForm({ ...form, installments: e.target.value })}
           />
         </Field>
 
@@ -933,17 +1092,6 @@ function AdminFinancial() {
           />
         </Field>
 
-        <Field label="Quantidade de parcelas">
-          <input
-            className="input compact-input"
-            type="number"
-            min="1"
-            max="60"
-            value={form.installments}
-            onChange={e => setForm({ ...form, installments: e.target.value })}
-          />
-        </Field>
-
         <Field label="WhatsApp">
           <input
             className="input compact-input"
@@ -959,23 +1107,18 @@ function AdminFinancial() {
           />
         </Field>
 
-        <div className="sm:col-span-2">
+        <div className="sm:col-span-2 xl:col-span-4">
           <Field label="Observação">
             <input
               className="input compact-input"
               value={form.paymentNotes}
-              onChange={e =>
-                setForm({ ...form, paymentNotes: e.target.value })
-              }
+              onChange={e => setForm({ ...form, paymentNotes: e.target.value })}
             />
           </Field>
         </div>
 
         <div className="sm:col-span-2 xl:col-span-4">
-          <button
-            className="mini-btn mini-btn-primary"
-            disabled={loading}
-          >
+          <button className="mini-btn mini-btn-primary" disabled={loading}>
             {loading ? 'Criando...' : 'Criar plano financeiro'}
           </button>
         </div>
@@ -1000,307 +1143,345 @@ function AdminFinancial() {
       </div>
 
       <div className="grid xl:grid-cols-2 gap-3">
-        {groups.length ? (
-          groups.map(group => {
-            const editing = editingCompanyId === group.company.id;
-            const expanded = expandedCompanyId === group.company.id;
-            const paidCount = group.paidItems.length;
-            const totalCount = group.items.length;
-            const allPaid = paidCount === totalCount;
-            const hasOverdue = group.overdueItems.length > 0;
-            const next = group.nextPending;
+        {groups.length ? groups.map(group => {
+          const editing = editingCompanyId === group.company.id;
+          const expanded = expandedCompanyId === group.company.id;
+          const paidCount = group.paidItems.length;
+          const totalCount = group.items.length;
+          const allPaid = paidCount === totalCount;
+          const hasOverdue = group.overdueItems.length > 0;
+          const next = group.nextPending;
 
-            return (
-              <article
-                key={group.company.id}
-                className="card compact-card p-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="text-[11px] text-slate-900 truncate">
-                      {group.company.name}
-                    </div>
-                    <div className="text-[9px] text-slate-400 mt-0.5">
-                      {group.company.cnpj || group.company.id}
-                    </div>
+          return (
+            <article key={group.company.id} className="card compact-card p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[11px] text-slate-900 truncate">
+                    {group.company.name}
                   </div>
-
-                  {!editing && (
-                    <button
-                      onClick={() => beginGroupEdit(group)}
-                      className="mini-btn"
-                    >
-                      Editar
-                    </button>
-                  )}
+                  <div className="text-[9px] text-slate-400 mt-0.5">
+                    {group.company.cnpj || group.company.id}
+                  </div>
                 </div>
 
-                {editing ? (
-                  <div className="grid grid-cols-2 gap-2 mt-3">
-                    <div className="col-span-2">
-                      <Field label="Descrição / contrato">
-                        <input
-                          className="input compact-input"
-                          value={groupEdit.description}
-                          onChange={e =>
-                            setGroupEdit({
-                              ...groupEdit,
-                              description: e.target.value
-                            })
-                          }
-                        />
-                      </Field>
-                    </div>
-
-                    <Field label="Valor por parcela">
-                      <input
-                        className="input compact-input"
-                        value={groupEdit.amount}
-                        onChange={e =>
-                          setGroupEdit({
-                            ...groupEdit,
-                            amount: e.target.value
-                          })
-                        }
-                      />
-                    </Field>
-
-                    <Field label="WhatsApp">
-                      <input
-                        className="input compact-input"
-                        value={groupEdit.customerPhone}
-                        onChange={e =>
-                          setGroupEdit({
-                            ...groupEdit,
-                            customerPhone: e.target.value
-                          })
-                        }
-                      />
-                    </Field>
-
-                    <div className="col-span-2">
-                      <Field label="Observação">
-                        <input
-                          className="input compact-input"
-                          value={groupEdit.paymentNotes}
-                          onChange={e =>
-                            setGroupEdit({
-                              ...groupEdit,
-                              paymentNotes: e.target.value
-                            })
-                          }
-                        />
-                      </Field>
-                    </div>
-
-                    <div className="col-span-2 flex gap-1.5 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setEditingCompanyId(null)}
-                        className="mini-btn"
-                      >
-                        Cancelar
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => saveGroupEdit(group)}
-                        className="mini-btn mini-btn-primary"
-                        disabled={loading}
-                      >
-                        {loading ? 'Salvando...' : 'Salvar'}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="mt-3 rounded-xl bg-slate-950 text-white px-4 py-3 flex items-center justify-between gap-4">
-                      <div>
-                        <div className="text-[9px] uppercase tracking-wider text-slate-400">
-                          Parcelas
-                        </div>
-                        <div className="text-[15px] mt-0.5">
-                          {paidCount} de {totalCount} pagas
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <div className="text-[9px] uppercase tracking-wider text-slate-400">
-                          Progresso
-                        </div>
-                        <div className="text-[15px] mt-0.5">
-                          {group.progress}%
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-2">
-                      <Progress value={group.progress} />
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
-                      <div className="mini-card">
-                        <span>Contrato</span>
-                        <b>{group.description || '—'}</b>
-                      </div>
-
-                      <div className="mini-card">
-                        <span>Parcela</span>
-                        <b>{money(next?.amount ?? group.first?.amount)}</b>
-                      </div>
-
-                      <div className="mini-card">
-                        <span>Total</span>
-                        <b>{money(group.totalAmount)}</b>
-                      </div>
-
-                      <div className="mini-card">
-                        <span>A receber</span>
-                        <b>{money(group.pendingAmount)}</b>
-                      </div>
-
-                      <div className="mini-card">
-                        <span>Próximo venc.</span>
-                        <b>{next ? dateBR(next.dueDate) : 'Quitado'}</b>
-                      </div>
-
-                      <div className="mini-card">
-                        <span>WhatsApp</span>
-                        <b>{group.phone || '—'}</b>
-                      </div>
-
-                      <div className="mini-card">
-                        <span>Status</span>
-                        <b>
-                          {allPaid
-                            ? 'Quitado'
-                            : hasOverdue
-                              ? `${group.overdueItems.length} vencida(s)`
-                              : 'Em dia'}
-                        </b>
-                      </div>
-
-                      <div className="mini-card">
-                        <span>Lembrete</span>
-                        <b>
-                          {next
-                            ? next.reminderSent
-                              ? 'Enviado'
-                              : 'Pendente'
-                            : '—'}
-                        </b>
-                      </div>
-                    </div>
-
-                    {group.notes && (
-                      <div className="mini-card mt-2">
-                        <span>Observação</span>
-                        <b>{group.notes}</b>
-                      </div>
-                    )}
-                  </>
-                )}
-
                 {!editing && (
-                  <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-slate-100">
-                    {!allPaid && (
-                      <button
-                        onClick={() => markNextPaid(group)}
-                        className="mini-btn mini-btn-primary"
-                      >
-                        Marcar próxima como paga
-                      </button>
-                    )}
+                  <button
+                    onClick={() => beginGroupEdit(group)}
+                    className="mini-btn"
+                  >
+                    Editar financeiro
+                  </button>
+                )}
+              </div>
 
-                    {next?.reminderSent && (
-                      <button
-                        onClick={() => resetReminder(next.id)}
-                        className="mini-btn"
-                      >
-                        Liberar lembrete
-                      </button>
-                    )}
+              {editing ? (
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <div className="col-span-2">
+                    <Field label="Descrição / contrato">
+                      <input
+                        className="input compact-input"
+                        value={groupEdit.description}
+                        onChange={e =>
+                          setGroupEdit({ ...groupEdit, description: e.target.value })
+                        }
+                      />
+                    </Field>
+                  </div>
 
-                    <button
-                      onClick={() =>
-                        setExpandedCompanyId(
-                          expanded ? null : group.company.id
-                        )
+                  <Field label="Valor do desenvolvimento">
+                    <input
+                      className="input compact-input"
+                      value={groupEdit.developmentAmount}
+                      onChange={e =>
+                        setGroupEdit({ ...groupEdit, developmentAmount: e.target.value })
                       }
+                    />
+                  </Field>
+
+                  <Field label="Desenvolvimento já pago">
+                    <input
+                      className="input compact-input"
+                      value={groupEdit.developmentPaidAmount}
+                      onChange={e =>
+                        setGroupEdit({ ...groupEdit, developmentPaidAmount: e.target.value })
+                      }
+                    />
+                  </Field>
+
+                  <Field label="Quantidade de parcelas">
+                    <input
+                      type="number"
+                      min="1"
+                      max="60"
+                      className="input compact-input"
+                      value={groupEdit.installments}
+                      onChange={e =>
+                        setGroupEdit({ ...groupEdit, installments: e.target.value })
+                      }
+                    />
+                  </Field>
+
+                  <Field label="Valor por parcela">
+                    <input
+                      className="input compact-input"
+                      value={groupEdit.amount}
+                      onChange={e =>
+                        setGroupEdit({ ...groupEdit, amount: e.target.value })
+                      }
+                    />
+                  </Field>
+
+                  <Field label="1º vencimento">
+                    <input
+                      type="date"
+                      className="input compact-input"
+                      value={groupEdit.firstDueDate}
+                      onChange={e =>
+                        setGroupEdit({ ...groupEdit, firstDueDate: e.target.value })
+                      }
+                    />
+                  </Field>
+
+                  <Field label="WhatsApp">
+                    <input
+                      className="input compact-input"
+                      value={groupEdit.customerPhone}
+                      onChange={e =>
+                        setGroupEdit({ ...groupEdit, customerPhone: e.target.value })
+                      }
+                    />
+                  </Field>
+
+                  <div className="col-span-2">
+                    <Field label="Observação">
+                      <input
+                        className="input compact-input"
+                        value={groupEdit.paymentNotes}
+                        onChange={e =>
+                          setGroupEdit({ ...groupEdit, paymentNotes: e.target.value })
+                        }
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="col-span-2 text-[9px] text-slate-400">
+                    Ao alterar a quantidade de parcelas ou o primeiro vencimento, o portal reorganiza automaticamente as parcelas mensais. Parcelas já pagas mantêm o status de pagamento.
+                  </div>
+
+                  <div className="col-span-2 flex gap-1.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setEditingCompanyId(null)}
                       className="mini-btn"
                     >
-                      {expanded ? 'Ocultar parcelas' : 'Gerenciar parcelas'}
+                      Cancelar
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => saveGroupEdit(group)}
+                      className="mini-btn mini-btn-primary"
+                      disabled={loading}
+                    >
+                      {loading ? 'Salvando...' : 'Salvar financeiro'}
                     </button>
                   </div>
-                )}
-
-                {expanded && !editing && (
-                  <div className="mt-3 pt-3 border-t border-slate-100">
-                    <div className="text-[9px] uppercase tracking-wider text-slate-400 mb-2">
-                      Parcelas deste cliente
+                </div>
+              ) : (
+                <>
+                  <div className="mt-3 rounded-xl bg-slate-950 text-white px-4 py-3 flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-[9px] uppercase tracking-wider text-slate-400">
+                        Parcelas
+                      </div>
+                      <div className="text-[15px] mt-0.5">
+                        {paidCount} de {totalCount} pagas
+                      </div>
                     </div>
 
-                    <div className="grid sm:grid-cols-2 gap-1.5">
-                      {group.items.map((item, index) => {
-                        const overdue = isOverdue(item);
-
-                        return (
-                          <div
-                            key={item.id}
-                            className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 flex items-center justify-between gap-3"
-                          >
-                            <div className="min-w-0">
-                              <div className="text-[10px] text-slate-700">
-                                Parcela {index + 1}/{totalCount}
-                              </div>
-                              <div className="text-[9px] text-slate-400 mt-0.5">
-                                {dateBR(item.dueDate)} • {money(item.amount)}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-1">
-                              <span
-                                className={`text-[9px] px-2 py-1 rounded-full ${
-                                  item.status === 'paid'
-                                    ? 'bg-emerald-100 text-emerald-700'
-                                    : overdue
-                                      ? 'bg-red-100 text-red-700'
-                                      : 'bg-amber-100 text-amber-700'
-                                }`}
-                              >
-                                {item.status === 'paid'
-                                  ? 'Paga'
-                                  : overdue
-                                    ? 'Vencida'
-                                    : 'Pendente'}
-                              </span>
-
-                              {item.status === 'paid' ? (
-                                <button
-                                  onClick={() => reopen(item.id)}
-                                  className="mini-btn"
-                                >
-                                  Reabrir
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => markPaid(item.id)}
-                                  className="mini-btn"
-                                >
-                                  Pagar
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div className="text-right">
+                      <div className="text-[9px] uppercase tracking-wider text-slate-400">
+                        Progresso
+                      </div>
+                      <div className="text-[15px] mt-0.5">
+                        {group.progress}%
+                      </div>
                     </div>
                   </div>
-                )}
-              </article>
-            );
-          })
-        ) : (
+
+                  <div className="mt-2">
+                    <Progress value={group.progress} />
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+                    <div className="mini-card">
+                      <span>Desenvolvimento</span>
+                      <b>{money(group.developmentAmount)}</b>
+                    </div>
+
+                    <div className="mini-card">
+                      <span>Desenv. pago</span>
+                      <b>{money(group.developmentPaidAmount)}</b>
+                    </div>
+
+                    <div className="mini-card">
+                      <span>Parcela</span>
+                      <b>{money(next?.amount ?? group.first?.amount)}</b>
+                    </div>
+
+                    <div className="mini-card">
+                      <span>Total parcelas</span>
+                      <b>{money(group.installmentsTotal)}</b>
+                    </div>
+
+                    <div className="mini-card">
+                      <span>Próximo venc.</span>
+                      <b>{next ? dateBR(next.dueDate) : 'Quitado'}</b>
+                    </div>
+
+                    <div className="mini-card">
+                      <span>A receber</span>
+                      <b>{money(group.pendingAmount)}</b>
+                    </div>
+
+                    <div className="mini-card">
+                      <span>Status</span>
+                      <b>
+                        {allPaid
+                          ? 'Quitado'
+                          : hasOverdue
+                            ? `${group.overdueItems.length} vencida(s)`
+                            : 'Em dia'}
+                      </b>
+                    </div>
+
+                    <div className="mini-card">
+                      <span>Lembrete</span>
+                      <b>
+                        {next
+                          ? next.reminderSent
+                            ? 'Enviado'
+                            : 'Pendente'
+                          : '—'}
+                      </b>
+                    </div>
+                  </div>
+
+                  {group.notes && (
+                    <div className="mini-card mt-2">
+                      <span>Observação</span>
+                      <b>{group.notes}</b>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {!editing && (
+                <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-slate-100">
+                  {!allPaid && (
+                    <button
+                      onClick={() => markNextPaid(group)}
+                      className="mini-btn mini-btn-primary"
+                    >
+                      Marcar próxima como paga
+                    </button>
+                  )}
+
+                  {next?.reminderSent && (
+                    <button
+                      onClick={() => resetReminder(next.id)}
+                      className="mini-btn"
+                    >
+                      Liberar lembrete
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() =>
+                      setExpandedCompanyId(expanded ? null : group.company.id)
+                    }
+                    className="mini-btn"
+                  >
+                    {expanded ? 'Ocultar parcelas' : 'Gerenciar parcelas'}
+                  </button>
+                </div>
+              )}
+
+              {expanded && !editing && (
+                <div className="mt-3 pt-3 border-t border-slate-100">
+                  <div className="text-[9px] uppercase tracking-wider text-slate-400 mb-2">
+                    Edição individual das parcelas
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {group.items.map((item, index) => {
+                      const overdue = isOverdue(item);
+
+                      return (
+                        <div
+                          key={item.id}
+                          className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 grid grid-cols-1 sm:grid-cols-[80px_1fr_110px_auto] items-center gap-2"
+                        >
+                          <div>
+                            <div className="text-[10px] text-slate-700">
+                              {index + 1}/{totalCount}
+                            </div>
+                            <div className="text-[8px] text-slate-400">
+                              {item.status === 'paid'
+                                ? 'Paga'
+                                : overdue
+                                  ? 'Vencida'
+                                  : 'Pendente'}
+                            </div>
+                          </div>
+
+                          <input
+                            type="date"
+                            className="input compact-input"
+                            value={item.dueDate || ''}
+                            onChange={e =>
+                              updateInstallment(item.id, { dueDate: e.target.value })
+                            }
+                          />
+
+                          <input
+                            className="input compact-input"
+                            defaultValue={item.amount}
+                            inputMode="decimal"
+                            onBlur={e => {
+                              const value = normalizeMoney(e.target.value);
+                              if (Number.isFinite(value) && value > 0 && value !== Number(item.amount)) {
+                                updateInstallment(item.id, { amount: value });
+                              }
+                            }}
+                          />
+
+                          <div className="flex items-center gap-1 justify-end">
+                            {item.status === 'paid' ? (
+                              <button
+                                onClick={() => reopen(item.id)}
+                                className="mini-btn"
+                              >
+                                Reabrir
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => markPaid(item.id)}
+                                className="mini-btn"
+                              >
+                                Marcar paga
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </article>
+          );
+        }) : (
           <div className="xl:col-span-2">
             <Empty
               title="Nenhum financeiro encontrado"
