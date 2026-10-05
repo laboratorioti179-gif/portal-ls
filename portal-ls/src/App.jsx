@@ -307,13 +307,13 @@ function AdminPortal() {
     {id:'dashboard',label:'Visão geral',icon:LayoutDashboard}, {id:'clients',label:'Clientes',icon:Users},
     {id:'projects',label:'Desenvolvimentos',icon:FolderKanban}, {id:'financial',label:'Financeiro',icon:WalletCards},
     {id:'financial-settings',label:'Config. financeiro',icon:Settings},
-    {id:'tickets',label:'Suporte',icon:Ticket}, {id:'register-company',label:'Cadastrar cliente',icon:Building2},
+    {id:'register-company',label:'Cadastrar cliente',icon:Building2},
     {id:'register-admin',label:'Cadastrar admin',icon:ShieldCheck},
   ];
   const titles = Object.fromEntries(menu.map(x=>[x.id,x.label]));
   const content = {
     dashboard:<AdminDashboard/>, clients:<AdminClients/>, projects:<AdminProjects/>, financial:<AdminFinancial/>,
-    'financial-settings':<AdminFinancialSettings/>, tickets:<AdminTickets/>, 'register-company':<AdminRegisterCompany onDone={()=>setView('clients')}/>,
+    'financial-settings':<AdminFinancialSettings/>, 'register-company':<AdminRegisterCompany onDone={()=>setView('clients')}/>,
     'register-admin':<AdminRegisterAdmin/>,
   }[view];
   return <PortalShell menu={menu} currentView={view} setView={setView} title={titles[view]}>{content}</PortalShell>;
@@ -411,107 +411,298 @@ function AdminDashboard() {
 }
 
 function AdminClients() {
-  const { companies, users, setUsers, projects, financials, tickets, fetchSupabase, setCompanies } = useContext(AppContext);
+  const { companies, projects, financials, fetchSupabase, setCompanies } = useContext(AppContext);
   const [search, setSearch] = useState('');
   const [editingId, setEditingId] = useState(null);
-  const [companyForm, setCompanyForm] = useState({ name:'', cnpj:'', paymentPlan:'' });
-  const [userDrafts, setUserDrafts] = useState({});
+  const [companyForm, setCompanyForm] = useState({
+    name:'',
+    cnpj:'',
+    clientName:'',
+    phone:'',
+    responsible:'',
+    email:'',
+    product:'',
+    paymentPlan:''
+  });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
   const filtered = companies.filter(c => {
     const q = search.toLowerCase().trim();
     if (!q) return true;
-    const linked = users.filter(u => u.companyId === c.id);
-    return [c.name,c.cnpj,c.id,c.paymentPlan,...linked.flatMap(u=>[u.name,u.email])]
-      .filter(Boolean).some(v=>String(v).toLowerCase().includes(q));
+    return [
+      c.name,
+      c.cnpj,
+      c.clientName,
+      c.phone,
+      c.responsible,
+      c.email,
+      c.product,
+      c.id,
+      c.paymentPlan
+    ].filter(Boolean).some(v => String(v).toLowerCase().includes(q));
   });
 
   const beginEdit = c => {
-    setEditingId(c.id); setMessage('');
-    setCompanyForm({name:c.name||'',cnpj:c.cnpj||'',paymentPlan:c.paymentPlan||''});
-    const drafts={}; users.filter(u=>u.companyId===c.id).forEach(u=>drafts[u.id]=u.name||'');
-    setUserDrafts(drafts);
+    setEditingId(c.id);
+    setMessage('');
+    setCompanyForm({
+      name:c.name||'',
+      cnpj:c.cnpj||'',
+      clientName:c.clientName||'',
+      phone:c.phone||'',
+      responsible:c.responsible||'',
+      email:c.email||'',
+      product:c.product||'',
+      paymentPlan:c.paymentPlan||''
+    });
   };
 
   const save = async c => {
-    setSaving(true); setMessage('');
+    setSaving(true);
+    setMessage('');
     try {
-      const updates={name:companyForm.name.trim(),cnpj:companyForm.cnpj.trim()||null,paymentPlan:companyForm.paymentPlan.trim()||null};
-      const cr=await fetchSupabase(`/rest/v1/companies?id=eq.${encodeURIComponent(c.id)}`,{method:'PATCH',body:JSON.stringify(updates)});
-      if(cr.error) throw new Error(cr.error.message||'Não foi possível atualizar a empresa.');
-      for(const u of users.filter(u=>u.companyId===c.id)){
-        const newName=(userDrafts[u.id]??u.name??'').trim();
-        if(newName && newName!==u.name){
-          const ur=await fetchSupabase(`/rest/v1/profiles?id=eq.${encodeURIComponent(u.id)}`,{method:'PATCH',body:JSON.stringify({name:newName})});
-          if(ur.error) throw new Error(ur.error.message||`Não foi possível atualizar ${u.name}.`);
-        }
+      const updates = {
+        name: companyForm.name.trim(),
+        cnpj: companyForm.cnpj.trim() || null,
+        clientName: companyForm.clientName.trim() || null,
+        phone: companyForm.phone.replace(/\D/g, '') || null,
+        responsible: companyForm.responsible.trim() || null,
+        email: companyForm.email.trim().toLowerCase() || null,
+        product: companyForm.product || null,
+        paymentPlan: companyForm.paymentPlan.trim() || null
+      };
+
+      const cr = await fetchSupabase(
+        `/rest/v1/companies?id=eq.${encodeURIComponent(c.id)}`,
+        { method:'PATCH', body:JSON.stringify(updates) }
+      );
+
+      if (cr.error) {
+        throw new Error(cr.error.message || 'Não foi possível atualizar o cliente.');
       }
-      setCompanies(prev=>prev.map(x=>x.id===c.id?{...x,...updates}:x));
-      setUsers(prev=>prev.map(u=>u.companyId===c.id&&userDrafts[u.id]!==undefined?{...u,name:userDrafts[u.id].trim()||u.name}:u));
-      setEditingId(null); setMessage('Informações atualizadas com sucesso.');
-    } catch(err){ setMessage(err.message||'Erro ao salvar alterações.'); }
-    finally{ setSaving(false); }
+
+      setCompanies(prev =>
+        prev.map(x => x.id === c.id ? { ...x, ...updates } : x)
+      );
+
+      setEditingId(null);
+      setMessage('Informações atualizadas com sucesso.');
+    } catch(err) {
+      setMessage(err.message || 'Erro ao salvar alterações.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const remove = async id => {
-    if(!confirm('Excluir esta empresa?')) return;
-    const r=await fetchSupabase(`/rest/v1/companies?id=eq.${encodeURIComponent(id)}`,{method:'DELETE'});
-    if(r.error) return alert('A empresa possui vínculos e não pôde ser excluída.');
-    setCompanies(x=>x.filter(c=>c.id!==id));
+    if (!confirm('Excluir este cliente?')) return;
+
+    const r = await fetchSupabase(
+      `/rest/v1/companies?id=eq.${encodeURIComponent(id)}`,
+      { method:'DELETE' }
+    );
+
+    if (r.error) {
+      return alert('O cliente possui vínculos e não pôde ser excluído.');
+    }
+
+    setCompanies(x => x.filter(c => c.id !== id));
   };
 
-  return <div className="space-y-4">
-    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-      <div><h2 className="page-title">Clientes</h2><p className="page-subtitle">Informações completas em cards compactos e editáveis.</p></div>
-      <SearchBox value={search} onChange={setSearch}/>
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+        <div>
+          <h2 className="page-title">Clientes</h2>
+          <p className="page-subtitle">
+            Cadastro comercial completo em cards compactos e editáveis.
+          </p>
+        </div>
+        <SearchBox value={search} onChange={setSearch}/>
+      </div>
+
+      {message && (
+        <Notice type={message.includes('sucesso') ? 'success' : 'error'}>
+          {message}
+        </Notice>
+      )}
+
+      <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-3">
+        {filtered.map(c => {
+          const clientProjects = projects.filter(p => p.companyId === c.id);
+          const clientFinancials = financials.filter(f => f.companyId === c.id);
+          const openAmount = clientFinancials
+            .filter(f => f.status === 'pending')
+            .reduce((s,f) => s + Number(f.amount || 0), 0);
+          const paidAmount = clientFinancials
+            .filter(f => f.status === 'paid')
+            .reduce((s,f) => s + Number(f.amount || 0), 0);
+
+          const isEditing = editingId === c.id;
+
+          return (
+            <article key={c.id} className="card compact-card p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center flex-none">
+                  <Building2 size={16}/>
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  {isEditing ? (
+                    <input
+                      className="input compact-input"
+                      value={companyForm.name}
+                      onChange={e => setCompanyForm(f => ({...f,name:e.target.value}))}
+                    />
+                  ) : (
+                    <div className="text-[13px] text-slate-900 truncate">
+                      {c.name}
+                    </div>
+                  )}
+                  <div className="text-[9px] text-slate-400 mt-0.5 truncate">
+                    {c.id}
+                  </div>
+                </div>
+
+                {!isEditing && (
+                  <button onClick={() => beginEdit(c)} className="mini-btn">
+                    Editar
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <div className="mini-card">
+                  <span>CNPJ / CPF</span>
+                  {isEditing ? (
+                    <input
+                      className="input compact-input mt-1"
+                      value={companyForm.cnpj}
+                      onChange={e => setCompanyForm(f => ({...f,cnpj:e.target.value}))}
+                    />
+                  ) : <b>{c.cnpj || 'Não informado'}</b>}
+                </div>
+
+                <div className="mini-card">
+                  <span>Nome</span>
+                  {isEditing ? (
+                    <input
+                      className="input compact-input mt-1"
+                      value={companyForm.clientName}
+                      onChange={e => setCompanyForm(f => ({...f,clientName:e.target.value}))}
+                    />
+                  ) : <b>{c.clientName || 'Não informado'}</b>}
+                </div>
+
+                <div className="mini-card">
+                  <span>Telefone</span>
+                  {isEditing ? (
+                    <input
+                      className="input compact-input mt-1"
+                      inputMode="tel"
+                      value={companyForm.phone}
+                      onChange={e => setCompanyForm(f => ({...f,phone:e.target.value}))}
+                    />
+                  ) : <b>{c.phone || 'Não informado'}</b>}
+                </div>
+
+                <div className="mini-card">
+                  <span>Responsável</span>
+                  {isEditing ? (
+                    <input
+                      className="input compact-input mt-1"
+                      value={companyForm.responsible}
+                      onChange={e => setCompanyForm(f => ({...f,responsible:e.target.value}))}
+                    />
+                  ) : <b>{c.responsible || 'Não informado'}</b>}
+                </div>
+
+                <div className="mini-card col-span-2">
+                  <span>E-mail</span>
+                  {isEditing ? (
+                    <input
+                      className="input compact-input mt-1"
+                      type="email"
+                      value={companyForm.email}
+                      onChange={e => setCompanyForm(f => ({...f,email:e.target.value}))}
+                    />
+                  ) : <b className="break-all">{c.email || 'Não informado'}</b>}
+                </div>
+
+                <div className="mini-card">
+                  <span>Produto</span>
+                  {isEditing ? (
+                    <select
+                      className="input compact-input mt-1"
+                      value={companyForm.product}
+                      onChange={e => setCompanyForm(f => ({...f,product:e.target.value}))}
+                    >
+                      <option value="">Selecione...</option>
+                      <option value="Automação">Automação</option>
+                      <option value="Sistema">Sistema</option>
+                      <option value="Aplicativo">Aplicativo</option>
+                    </select>
+                  ) : <b>{c.product || 'Não definido'}</b>}
+                </div>
+
+                <div className="mini-card">
+                  <span>Projetos</span>
+                  <b>{clientProjects.length}</b>
+                </div>
+
+                <div className="mini-card">
+                  <span>A receber</span>
+                  <b>{money(openAmount)}</b>
+                </div>
+
+                <div className="mini-card">
+                  <span>Recebido</span>
+                  <b>{money(paidAmount)}</b>
+                </div>
+              </div>
+
+              <div className="mini-card mt-2">
+                <span>Plano de pagamento</span>
+                {isEditing ? (
+                  <input
+                    className="input compact-input mt-1"
+                    value={companyForm.paymentPlan}
+                    onChange={e => setCompanyForm(f => ({...f,paymentPlan:e.target.value}))}
+                  />
+                ) : <b>{c.paymentPlan || 'Não definido'}</b>}
+              </div>
+
+              {isEditing && (
+                <div className="flex justify-between gap-2 mt-3 pt-3 border-t border-slate-100">
+                  <button onClick={() => remove(c.id)} className="mini-btn text-red-600">
+                    Excluir
+                  </button>
+
+                  <div className="flex gap-2">
+                    <button onClick={() => setEditingId(null)} className="mini-btn">
+                      Cancelar
+                    </button>
+                    <button
+                      disabled={saving}
+                      onClick={() => save(c)}
+                      className="mini-btn mini-btn-primary"
+                    >
+                      {saving ? 'Salvando...' : 'Salvar'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
+
+      {filtered.length === 0 && (
+        <Empty title="Nenhum cliente encontrado" text="Tente outro termo de busca."/>
+      )}
     </div>
-    {message&&<Notice type={message.includes('sucesso')?'success':'error'}>{message}</Notice>}
-    <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-3">
-      {filtered.map(c=>{
-        const linkedUsers=users.filter(u=>u.companyId===c.id);
-        const clientProjects=projects.filter(p=>p.companyId===c.id);
-        const clientFinancials=financials.filter(f=>f.companyId===c.id);
-        const clientTickets=tickets.filter(t=>t.companyId===c.id);
-        const openAmount=clientFinancials.filter(f=>f.status==='pending').reduce((s,f)=>s+Number(f.amount||0),0);
-        const paidAmount=clientFinancials.filter(f=>f.status==='paid').reduce((s,f)=>s+Number(f.amount||0),0);
-        const openTickets=clientTickets.filter(t=>t.status==='open').length;
-        const isEditing=editingId===c.id;
-        const primary=linkedUsers[0];
-        return <article key={c.id} className="card compact-card p-4">
-          <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center flex-none"><Building2 size={16}/></div>
-            <div className="min-w-0 flex-1">
-              {isEditing?<input className="input compact-input" value={companyForm.name} onChange={e=>setCompanyForm(f=>({...f,name:e.target.value}))}/>:<div className="text-[13px] text-slate-900 truncate">{c.name}</div>}
-              <div className="text-[10px] text-slate-400 mt-0.5 truncate">{c.id}</div>
-            </div>
-            {!isEditing&&<button onClick={()=>beginEdit(c)} className="mini-btn">Editar</button>}
-          </div>
-          <div className="grid grid-cols-2 gap-2 mt-3">
-            <div className="mini-card"><span>CNPJ</span>{isEditing?<input className="input compact-input mt-1" value={companyForm.cnpj} onChange={e=>setCompanyForm(f=>({...f,cnpj:e.target.value}))}/>:<b>{c.cnpj||'Não informado'}</b>}</div>
-            <div className="mini-card"><span>Responsável</span><b>{primary?.name||'Sem responsável'}</b></div>
-            <div className="mini-card"><span>Projetos</span><b>{clientProjects.length}</b></div>
-            <div className="mini-card"><span>Chamados</span><b>{openTickets}</b></div>
-            <div className="mini-card"><span>A receber</span><b>{money(openAmount)}</b></div>
-            <div className="mini-card"><span>Recebido</span><b>{money(paidAmount)}</b></div>
-          </div>
-          <div className="mini-card mt-2"><span>Plano de pagamento</span>{isEditing?<input className="input compact-input mt-1" value={companyForm.paymentPlan} onChange={e=>setCompanyForm(f=>({...f,paymentPlan:e.target.value}))}/>:<b>{c.paymentPlan||'Não definido'}</b>}</div>
-          <div className="mt-2 rounded-xl border border-slate-100 p-3">
-            <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-2">Acessos</div>
-            {linkedUsers.length===0?<div className="text-[11px] text-slate-400">Nenhum usuário cadastrado.</div>:linkedUsers.map(u=><div key={u.id} className="py-1.5 first:pt-0 last:pb-0 border-b last:border-0 border-slate-100">
-              {isEditing?<input className="input compact-input" value={userDrafts[u.id]??u.name??''} onChange={e=>setUserDrafts(d=>({...d,[u.id]:e.target.value}))}/>:<div className="text-[11px] text-slate-700">{u.name}</div>}
-              <div className="text-[10px] text-slate-400 truncate mt-0.5">{u.email||'Sem e-mail'}</div>
-            </div>)}
-          </div>
-          {isEditing&&<div className="flex justify-between gap-2 mt-3 pt-3 border-t border-slate-100">
-            <button onClick={()=>remove(c.id)} className="mini-btn text-red-600">Excluir</button>
-            <div className="flex gap-2"><button onClick={()=>setEditingId(null)} className="mini-btn">Cancelar</button><button disabled={saving} onClick={()=>save(c)} className="mini-btn mini-btn-primary">{saving?'Salvando...':'Salvar'}</button></div>
-          </div>}
-        </article>;
-      })}
-    </div>
-    {filtered.length===0&&<Empty title="Nenhum cliente encontrado" text="Tente outro termo de busca."/>}
-  </div>;
+  );
 }
 
 function InfoLine({ label, value }) {
@@ -519,13 +710,158 @@ function InfoLine({ label, value }) {
 }
 
 function AdminRegisterCompany({ onDone }) {
-  const { setCompanies, setUsers, createManagedUser, fetchSupabase, generateId } = useContext(AppContext);
-  const [form,setForm]=useState({name:'',cnpj:'',clientName:'',clientEmail:'',clientPassword:''});
-  const [loading,setLoading]=useState(false); const [msg,setMsg]=useState('');
-  const change=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const submit=async e=>{e.preventDefault();setLoading(true);setMsg('');const id=generateId('CMP');const company={id,name:form.name.trim(),cnpj:form.cnpj.trim()||null};
-    try{const cr=await fetchSupabase('/rest/v1/companies',{method:'POST',body:JSON.stringify(company)});if(cr.error)throw new Error(cr.error.message||'Erro ao criar empresa');let profile=null;if(form.clientEmail&&form.clientPassword){const r=await createManagedUser({name:form.clientName||form.name,email:form.clientEmail.toLowerCase(),password:form.clientPassword,role:'client',companyId:id});profile=r.profile;}setCompanies(x=>[...x,company]);if(profile)setUsers(x=>[...x,profile]);setMsg('Cliente cadastrado com sucesso.');setForm({name:'',cnpj:'',clientName:'',clientEmail:'',clientPassword:''});setTimeout(()=>onDone?.(),700);}catch(err){await fetchSupabase(`/rest/v1/companies?id=eq.${id}`,{method:'DELETE'});setMsg(err.message);}finally{setLoading(false)}};
-  return <div className="max-w-3xl"><div className="card p-6 sm:p-8"><h2 className="text-2xl font-normal">Cadastrar cliente</h2><p className="text-slate-500 mt-1 mb-7">Crie a empresa e, se desejar, o acesso do responsável.</p>{msg&&<Notice>{msg}</Notice>}<form onSubmit={submit} className="grid sm:grid-cols-2 gap-5"><Field label="Empresa"><input className="input" value={form.name} onChange={e=>change('name',e.target.value)} required/></Field><Field label="CNPJ"><input className="input" value={form.cnpj} onChange={e=>change('cnpj',e.target.value)}/></Field><div className="sm:col-span-2 border-t pt-5"><h3 className="font-normal">Acesso do cliente</h3></div><Field label="Responsável"><input className="input" value={form.clientName} onChange={e=>change('clientName',e.target.value)}/></Field><Field label="E-mail"><input className="input" type="email" value={form.clientEmail} onChange={e=>change('clientEmail',e.target.value)}/></Field><Field label="Senha temporária"><input className="input" type="password" minLength={8} value={form.clientPassword} onChange={e=>change('clientPassword',e.target.value)}/></Field><div className="sm:col-span-2"><button disabled={loading} className="btn-primary">{loading?'Salvando...':'Cadastrar cliente'}</button></div></form></div></div>;
+  const { setCompanies, fetchSupabase, generateId } = useContext(AppContext);
+
+  const [form, setForm] = useState({
+    name:'',
+    cnpj:'',
+    clientName:'',
+    phone:'',
+    responsible:'',
+    email:'',
+    product:''
+  });
+
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const change = (k,v) => setForm(f => ({...f,[k]:v}));
+
+  const submit = async e => {
+    e.preventDefault();
+    setLoading(true);
+    setMsg('');
+
+    const id = generateId('CMP');
+
+    const company = {
+      id,
+      name: form.name.trim(),
+      cnpj: form.cnpj.trim() || null,
+      clientName: form.clientName.trim() || null,
+      phone: form.phone.replace(/\D/g, '') || null,
+      responsible: form.responsible.trim() || null,
+      email: form.email.trim().toLowerCase() || null,
+      product: form.product || null
+    };
+
+    try {
+      const cr = await fetchSupabase('/rest/v1/companies', {
+        method:'POST',
+        body:JSON.stringify(company)
+      });
+
+      if (cr.error) {
+        throw new Error(cr.error.message || 'Erro ao cadastrar cliente.');
+      }
+
+      setCompanies(x => [...x, company]);
+      setMsg('Cliente cadastrado com sucesso.');
+
+      setForm({
+        name:'',
+        cnpj:'',
+        clientName:'',
+        phone:'',
+        responsible:'',
+        email:'',
+        product:''
+      });
+
+      setTimeout(() => onDone?.(), 700);
+    } catch(err) {
+      setMsg(err.message || 'Não foi possível cadastrar o cliente.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="max-w-3xl">
+      <div className="card p-5 sm:p-6">
+        <h2 className="text-lg font-normal">Cadastrar cliente</h2>
+        <p className="text-[11px] text-slate-500 mt-1 mb-5">
+          Cadastre os dados comerciais do cliente e o produto contratado.
+        </p>
+
+        {msg && <Notice>{msg}</Notice>}
+
+        <form onSubmit={submit} className="grid sm:grid-cols-2 gap-3">
+          <Field label="Empresa">
+            <input
+              className="input compact-input"
+              value={form.name}
+              onChange={e => change('name',e.target.value)}
+              required
+            />
+          </Field>
+
+          <Field label="CNPJ / CPF">
+            <input
+              className="input compact-input"
+              value={form.cnpj}
+              onChange={e => change('cnpj',e.target.value)}
+            />
+          </Field>
+
+          <Field label="Nome">
+            <input
+              className="input compact-input"
+              value={form.clientName}
+              onChange={e => change('clientName',e.target.value)}
+            />
+          </Field>
+
+          <Field label="Telefone">
+            <input
+              className="input compact-input"
+              inputMode="tel"
+              value={form.phone}
+              onChange={e => change('phone',e.target.value)}
+              placeholder="5511999999999"
+            />
+          </Field>
+
+          <Field label="Responsável">
+            <input
+              className="input compact-input"
+              value={form.responsible}
+              onChange={e => change('responsible',e.target.value)}
+            />
+          </Field>
+
+          <Field label="E-mail">
+            <input
+              className="input compact-input"
+              type="email"
+              value={form.email}
+              onChange={e => change('email',e.target.value)}
+            />
+          </Field>
+
+          <Field label="Produto contratado">
+            <select
+              className="input compact-input"
+              value={form.product}
+              onChange={e => change('product',e.target.value)}
+              required
+            >
+              <option value="">Selecione...</option>
+              <option value="Automação">Automação</option>
+              <option value="Sistema">Sistema</option>
+              <option value="Aplicativo">Aplicativo</option>
+            </select>
+          </Field>
+
+          <div className="sm:col-span-2 pt-1">
+            <button disabled={loading} className="btn-primary">
+              {loading ? 'Salvando...' : 'Cadastrar cliente'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 }
 
 function AdminRegisterAdmin(){
@@ -1544,8 +1880,8 @@ function AdminTickets(){
 
 function ClientPortal(){
   const [view,setView]=useState('home');
-  const menu=[{id:'home',label:'Início',icon:LayoutDashboard},{id:'projects',label:'Projetos',icon:FolderKanban},{id:'financial',label:'Financeiro',icon:CreditCard},{id:'support',label:'Suporte',icon:MessageSquareText},{id:'profile',label:'Minha conta',icon:Users}];
-  const titles=Object.fromEntries(menu.map(x=>[x.id,x.label]));const content={home:<ClientHome go={setView}/>,projects:<ClientProjects/>,financial:<ClientFinancial/>,support:<ClientSupport/>,profile:<ClientProfile/>}[view];
+  const menu=[{id:'home',label:'Início',icon:LayoutDashboard},{id:'projects',label:'Projetos',icon:FolderKanban},{id:'financial',label:'Financeiro',icon:CreditCard},{id:'profile',label:'Minha conta',icon:Users}];
+  const titles=Object.fromEntries(menu.map(x=>[x.id,x.label]));const content={home:<ClientHome go={setView}/>,projects:<ClientProjects/>,financial:<ClientFinancial/>,profile:<ClientProfile/>}[view];
   return <PortalShell menu={menu} currentView={view} setView={setView} title={titles[view]}>{content}</PortalShell>;
 }
 
