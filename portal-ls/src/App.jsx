@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import {
   AlertCircle, ArrowRight, BadgeDollarSign, Banknote, Bell, BriefcaseBusiness,
-  Building2, Check, CheckCircle2, ChevronDown, ChevronRight, CircleDollarSign,
+  Building2, Check, CheckCircle2, ChevronDown, ChevronUp, ChevronRight, CircleDollarSign,
   Clock3, CreditCard, FileText, FolderKanban, Gauge, History, LayoutDashboard,
   LogOut, Menu, MessageSquareText, Plus, Receipt, RefreshCw, Search, Settings,
   ShieldCheck, Sparkles, Ticket, UserPlus, Users, WalletCards, X
