@@ -2010,6 +2010,48 @@ function AdminFinancial() {
                               </button>
                             )}
                           </div>
+
+                          {item.receiptUrl && (
+                            <div className="sm:col-span-4 mt-1 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2">
+                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <Receipt size={14} className="text-emerald-600 flex-none"/>
+                                  <div className="min-w-0">
+                                    <div className="text-[9px] uppercase tracking-wider text-emerald-700">
+                                      Comprovante recebido
+                                    </div>
+                                    <div className="text-[9px] text-slate-500 truncate">
+                                      Parcela {index + 1}/{totalCount}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <a
+                                  href={item.receiptUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="mini-btn"
+                                >
+                                  Ver comprovante
+                                </a>
+                              </div>
+
+                              {/\.(png|jpe?g|webp|gif)(\?|$)/i.test(item.receiptUrl) && (
+                                <a
+                                  href={item.receiptUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="block mt-2"
+                                >
+                                  <img
+                                    src={item.receiptUrl}
+                                    alt={`Comprovante da parcela ${index + 1}`}
+                                    className="max-h-40 rounded-lg border border-emerald-100 object-contain bg-white"
+                                  />
+                                </a>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
