@@ -566,12 +566,23 @@ function AdminClients() {
         {filtered.map(c => {
           const clientProjects = projects.filter(p => p.companyId === c.id);
           const clientFinancials = financials.filter(f => f.companyId === c.id);
-          const openAmount = clientFinancials
+          const pendingInstallmentsAmount = clientFinancials
             .filter(f => f.status === 'pending')
             .reduce((s,f) => s + Number(f.amount || 0), 0);
-          const paidAmount = clientFinancials
+
+          const paidInstallmentsAmount = clientFinancials
             .filter(f => f.status === 'paid')
             .reduce((s,f) => s + Number(f.amount || 0), 0);
+
+          const developmentAmount = Number(c.developmentAmount || 0);
+          const developmentPaidAmount = Number(c.developmentPaidAmount || 0);
+          const developmentBalance = Math.max(
+            developmentAmount - developmentPaidAmount,
+            0
+          );
+
+          const openAmount = pendingInstallmentsAmount + developmentBalance;
+          const paidAmount = paidInstallmentsAmount + developmentPaidAmount;
 
           const isEditing = editingId === c.id;
           const isExpanded = expandedId === c.id;
