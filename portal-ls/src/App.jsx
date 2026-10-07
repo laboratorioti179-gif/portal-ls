@@ -412,14 +412,30 @@ function AdminDashboard() {
     .filter(f => f.status === 'paid' && f.paidAt && new Date(f.paidAt).getMonth() === now.getMonth() && new Date(f.paidAt).getFullYear() === now.getFullYear())
     .reduce((s, f) => s + Number(f.amount || 0), 0);
 
-  const developmentsReceivedMonth = projects
+  const projectDevelopmentPaymentsThisMonth = projects
     .filter(p => {
       if (!p.developmentPaidDate || Number(p.developmentPaidAmount || 0) <= 0) return false;
       const paidDate = new Date(`${String(p.developmentPaidDate).slice(0,10)}T12:00:00`);
       return paidDate.getMonth() === now.getMonth() && paidDate.getFullYear() === now.getFullYear();
-    })
+    });
+
+  const projectsWithPayment = new Set(
+    projectDevelopmentPaymentsThisMonth.map(p => p.companyId).filter(Boolean)
+  );
+
+  const developmentsReceivedFromProjects = projectDevelopmentPaymentsThisMonth
     .reduce((sum, p) => sum + Number(p.developmentPaidAmount || 0), 0);
 
+  const developmentsReceivedFromCompanies = companies
+    .filter(c => {
+      if (projectsWithPayment.has(c.id)) return false;
+      if (!c.developmentPaidDate || Number(c.developmentPaidAmount || 0) <= 0) return false;
+      const paidDate = new Date(`${String(c.developmentPaidDate).slice(0,10)}T12:00:00`);
+      return paidDate.getMonth() === now.getMonth() && paidDate.getFullYear() === now.getFullYear();
+    })
+    .reduce((sum, c) => sum + Number(c.developmentPaidAmount || 0), 0);
+
+  const developmentsReceivedMonth = developmentsReceivedFromProjects + developmentsReceivedFromCompanies;
   const receivedMonth = installmentsReceivedMonth + developmentsReceivedMonth;
   const toReceive = openFinancials.reduce((s, f) => s + Number(f.amount || 0), 0);
   const waitingClient = projects.filter(p => p.stage === 'waiting_client').length;
@@ -1166,6 +1182,7 @@ function AdminFinancial() {
     description: '',
     developmentAmount: '',
     developmentPaidAmount: '',
+    developmentPaidDate: '',
     amount: '',
     dueDate: '',
     installments: 1,
@@ -1219,12 +1236,14 @@ function AdminFinancial() {
     return `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`;
   };
 
-  const updateCompanyFinancialData = async (companyId, developmentAmount, developmentPaidAmount, paymentPlan) => {
+  const updateCompanyFinancialData = async (companyId, developmentAmount, developmentPaidAmount, developmentPaidDate = null, paymentPlan = undefined) => {
     const updates = {
       developmentAmount,
       developmentPaidAmount,
-      paymentPlan
+      developmentPaidDate: Number(developmentPaidAmount || 0) > 0 ? (developmentPaidDate || null) : null,
     };
+
+    if (paymentPlan !== undefined) updates.paymentPlan = paymentPlan;
 
     const r = await fetchSupabase(`/rest/v1/companies?id=eq.${companyId}`, {
       method: 'PATCH',
@@ -1259,6 +1278,10 @@ function AdminFinancial() {
       return alert('Informe quanto do desenvolvimento já foi pago.');
     }
 
+    if (developmentPaidAmount > 0 && !form.developmentPaidDate) {
+      return alert('Informe a data do pagamento do desenvolvimento.');
+    }
+
     if (!form.customerPhone.trim()) {
       return alert('Informe o WhatsApp do cliente.');
     }
@@ -1274,6 +1297,7 @@ function AdminFinancial() {
         form.companyId,
         developmentAmount,
         developmentPaidAmount,
+        form.developmentPaidDate || null,
         paymentPlan
       );
 
@@ -1312,6 +1336,7 @@ function AdminFinancial() {
         description: '',
         developmentAmount: '',
         developmentPaidAmount: '',
+        developmentPaidDate: '',
         amount: '',
         dueDate: '',
         installments: 1,
@@ -1446,6 +1471,7 @@ function AdminFinancial() {
         progress,
         developmentAmount: Number(company.developmentAmount || 0),
         developmentPaidAmount: Number(company.developmentPaidAmount || 0),
+        developmentPaidDate: company.developmentPaidDate || '',
         description: cleanDescription(first?.description),
         phone: nextPending?.customerPhone || first?.customerPhone || '',
         notes: nextPending?.paymentNotes || first?.paymentNotes || ''
@@ -1475,6 +1501,7 @@ function AdminFinancial() {
       description: group.description || '',
       developmentAmount: String(group.developmentAmount || 0),
       developmentPaidAmount: String(group.developmentPaidAmount || 0),
+      developmentPaidDate: group.developmentPaidDate || '',
       installments: String(group.items.length || 1),
       amount: String(group.nextPending?.amount ?? group.first?.amount ?? ''),
       firstDueDate: group.first?.dueDate || '',
@@ -1501,6 +1528,10 @@ function AdminFinancial() {
       return alert('Informe um valor válido para o desenvolvimento já pago.');
     }
 
+    if (developmentPaidAmount > 0 && !groupEdit.developmentPaidDate) {
+      return alert('Informe a data do pagamento do desenvolvimento.');
+    }
+
     if (!groupEdit.firstDueDate) {
       return alert('Informe a data do primeiro vencimento.');
     }
@@ -1511,7 +1542,8 @@ function AdminFinancial() {
       await updateCompanyFinancialData(
         group.company.id,
         developmentAmount,
-        developmentPaidAmount
+        developmentPaidAmount,
+        groupEdit.developmentPaidDate || null
       );
 
       const currentItems = [...group.items].sort(
@@ -1752,6 +1784,16 @@ function AdminFinancial() {
           />
         </Field>
 
+        <Field label="Data do pagamento do desenvolvimento">
+          <input
+            className="input compact-input"
+            type="date"
+            value={form.developmentPaidDate}
+            onChange={e => setForm({ ...form, developmentPaidDate: e.target.value })}
+            disabled={Number(normalizeMoney(form.developmentPaidAmount || 0)) <= 0}
+          />
+        </Field>
+
         <Field label="Quantidade de parcelas">
           <input
             className="input compact-input"
@@ -1896,6 +1938,18 @@ function AdminFinancial() {
                       onChange={e =>
                         setGroupEdit({ ...groupEdit, developmentPaidAmount: e.target.value })
                       }
+                    />
+                  </Field>
+
+                  <Field label="Data do pagamento do desenvolvimento">
+                    <input
+                      type="date"
+                      className="input compact-input"
+                      value={groupEdit.developmentPaidDate || ''}
+                      onChange={e =>
+                        setGroupEdit({ ...groupEdit, developmentPaidDate: e.target.value })
+                      }
+                      disabled={Number(normalizeMoney(groupEdit.developmentPaidAmount || 0)) <= 0}
                     />
                   </Field>
 
