@@ -573,6 +573,19 @@ function AdminClients() {
         {filtered.map(c => {
           const clientProjects = projects.filter(p => p.companyId === c.id);
           const clientFinancials = financials.filter(f => f.companyId === c.id);
+
+          const installmentAmounts = clientFinancials
+            .map(f => Number(f.amount || 0))
+            .filter(v => Number.isFinite(v));
+          const sameInstallmentAmount = installmentAmounts.length > 0 && installmentAmounts.every(v => v === installmentAmounts[0]);
+          const derivedPaymentPlan = c.paymentPlan || (
+            clientFinancials.length > 0
+              ? sameInstallmentAmount
+                ? `${clientFinancials.length}x de ${money(installmentAmounts[0])}`
+                : `${clientFinancials.length} parcelas`
+              : 'Não definido'
+          );
+
           const pendingInstallmentsAmount = clientFinancials
             .filter(f => f.status === 'pending' || f.status === 'in_review')
             .reduce((s,f) => s + Number(f.amount || 0), 0);
@@ -811,7 +824,7 @@ function AdminClients() {
 
                         <div className="mini-card sm:col-span-2">
                           <span>Plano de pagamento</span>
-                          <b>{c.paymentPlan || 'Não definido'}</b>
+                          <b>{derivedPaymentPlan}</b>
                         </div>
                       </div>
 
@@ -1087,10 +1100,11 @@ function AdminFinancial() {
     return `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`;
   };
 
-  const updateCompanyFinancialData = async (companyId, developmentAmount, developmentPaidAmount) => {
+  const updateCompanyFinancialData = async (companyId, developmentAmount, developmentPaidAmount, paymentPlan) => {
     const updates = {
       developmentAmount,
-      developmentPaidAmount
+      developmentPaidAmount,
+      paymentPlan
     };
 
     const r = await fetchSupabase(`/rest/v1/companies?id=eq.${companyId}`, {
@@ -1135,11 +1149,13 @@ function AdminFinancial() {
     try {
       const total = Math.max(1, Number(form.installments || 1));
       const created = [];
+      const paymentPlan = `${total}x de ${money(numericAmount)}`;
 
       await updateCompanyFinancialData(
         form.companyId,
         developmentAmount,
-        developmentPaidAmount
+        developmentPaidAmount,
+        paymentPlan
       );
 
       for (let i = 0; i < total; i++) {
