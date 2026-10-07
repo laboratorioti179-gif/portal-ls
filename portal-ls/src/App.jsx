@@ -1040,6 +1040,26 @@ function AdminFinancial() {
   const [expandedCompanyId, setExpandedCompanyId] = useState(null);
   const [groupEdit, setGroupEdit] = useState({});
 
+  const abrirComprovante = async (receiptUrl) => {
+    try {
+      if (!receiptUrl) return;
+
+      const filePath = receiptUrl.replace(/^receipts\//, '');
+
+      const { data, error } = await supabase.storage
+        .from('receipts')
+        .createSignedUrl(filePath, 60 * 10);
+
+      if (error) throw error;
+      if (!data?.signedUrl) throw new Error('URL assinada não foi gerada.');
+
+      window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      console.error('Erro ao abrir comprovante:', error);
+      alert('Não foi possível abrir o comprovante.');
+    }
+  };
+
   const normalizeMoney = value => {
     const raw = String(value || '').trim();
     const normalized = raw.includes(',')
@@ -2026,14 +2046,13 @@ function AdminFinancial() {
                                   </div>
                                 </div>
 
-                                <a
-                                  href={item.receiptUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
+                                <button
+                                  type="button"
+                                  onClick={() => abrirComprovante(item.receiptUrl)}
                                   className="mini-btn"
                                 >
                                   Ver comprovante
-                                </a>
+                                </button>
                               </div>
 
                               {/\.(png|jpe?g|webp|gif)(\?|$)/i.test(item.receiptUrl) && (
