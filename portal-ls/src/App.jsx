@@ -402,7 +402,7 @@ function AdminPortal() {
 }
 
 function AdminDashboard() {
-  const { companies, projects, tickets, financials } = useContext(AppContext);
+  const { companies, projects, financials } = useContext(AppContext);
   const pending = financials.filter(f => f.status === 'pending');
   const inReview = financials.filter(f => f.status === 'in_review');
   const openFinancials = financials.filter(f => f.status === 'pending' || f.status === 'in_review');
@@ -414,6 +414,7 @@ function AdminDashboard() {
   const toReceive = openFinancials.reduce((s, f) => s + Number(f.amount || 0), 0);
   const waitingClient = projects.filter(p => p.stage === 'waiting_client').length;
   const activeProjects = projects.filter(p => p.status !== 'closed');
+  const averageProgress = Math.round(projects.length ? projects.reduce((s,p) => s + Number(p.progress || 0), 0) / projects.length : 0);
 
   const COLORS = ['#2563eb', '#6366f1', '#0ea5e9', '#14b8a6', '#f59e0b', '#8b5cf6', '#ec4899', '#64748b'];
   const companiesData = companies.map((c, i) => ({ name: c.name, value: 1, color: COLORS[i % COLORS.length] }));
@@ -422,11 +423,10 @@ function AdminDashboard() {
     value: projects.filter(p => p.companyId === c.id).length,
     color: COLORS[i % COLORS.length],
   })).filter(x => x.value > 0);
-  const ticketsData = companies.map((c, i) => ({
-    name: c.name,
-    value: tickets.filter(t => t.companyId === c.id && t.status === 'open').length,
-    color: COLORS[i % COLORS.length],
-  })).filter(x => x.value > 0);
+  const progressData = projects.length ? [
+    { name: 'Concluído', value: averageProgress, color: COLORS[0] },
+    { name: 'Restante', value: Math.max(0, 100 - averageProgress), color: COLORS[7] },
+  ] : [];
 
   const ChartCard = ({ title, total, data, empty }) => (
     <div className="card p-5 sm:p-6">
@@ -456,25 +456,24 @@ function AdminDashboard() {
   return <div className="space-y-8">
     <section>
       <h2 className="text-3xl tracking-tight text-slate-950">Operação LS</h2>
-      <p className="text-slate-500 mt-1">Clientes, desenvolvimentos, suporte e financeiro em uma única visão.</p>
+      <p className="text-slate-500 mt-1">Clientes, desenvolvimentos e financeiro em uma única visão.</p>
     </section>
 
     <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-5">
       <Metric icon={Building2} label="Clientes" value={companies.length}/>
       <Metric icon={FolderKanban} label="Projetos ativos" value={activeProjects.length}/>
       <Metric icon={Clock3} label="Aguardando cliente" value={waitingClient}/>
-      <Metric icon={Ticket} label="Chamados abertos" value={tickets.filter(t => t.status === 'open').length}/>
       <Metric icon={CircleDollarSign} label="A receber" value={money(toReceive)}/>
       <Metric icon={Banknote} label="Recebido no mês" value={money(receivedMonth)}/>
       <Metric icon={AlertCircle} label="Vencidos" value={overdue.length}/>
       <Metric icon={Receipt} label="Em análise" value={inReview.length}/>
-      <Metric icon={Gauge} label="Progresso médio" value={`${Math.round(projects.length ? projects.reduce((s,p) => s + Number(p.progress || 0), 0) / projects.length : 0)}%`}/>
+      <Metric icon={Gauge} label="Progresso médio" value={`${averageProgress}%`}/>
     </div>
 
     <div className="grid md:grid-cols-3 gap-5">
       <ChartCard title="Empresas atendidas" total={companies.length} data={companiesData} empty="Nenhum cliente cadastrado." />
       <ChartCard title="Projetos por cliente" total={projects.length} data={projectsData} empty="Nenhum projeto cadastrado." />
-      <ChartCard title="Chamados abertos" total={tickets.filter(t => t.status === 'open').length} data={ticketsData} empty="Nenhum chamado aberto." />
+      <ChartCard title="Progresso médio" total={`${averageProgress}%`} data={progressData} empty="Nenhum projeto cadastrado." />
     </div>
 
     <div className="grid xl:grid-cols-2 gap-6">
