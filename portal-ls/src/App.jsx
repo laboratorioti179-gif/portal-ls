@@ -83,7 +83,7 @@ const LS_FAVICON = `data:image/svg+xml,${encodeURIComponent(`
   <path d="M18 14v34h19" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M46 21c-2.4-2.7-6-4.4-10.2-4.4-6.7 0-11.3 3.8-11.3 8.9 0 12.8 20.4 7 20.4 17 0 4.8-4.3 8.7-10.8 8.7-4.7 0-8.9-1.7-11.8-4.8" fill="none" stroke="#ffffff" stroke-width="4.3" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M48 11l1.6 3.8L53.4 16l-3.8 1.3L48 21l-1.6-3.7L42.6 16l3.8-1.2L48 11z" fill="url(#gold)"/>
-</svg>`)};
+</svg>`)}`;
 
 function applyLSBranding() {
   if (typeof document === 'undefined') return;
