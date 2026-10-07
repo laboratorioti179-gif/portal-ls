@@ -66,6 +66,84 @@ const fetchSupabase = async (path, options = {}) => {
   }
 };
 
+const LS_FAVICON = `data:image/svg+xml,${encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#081224"/>
+      <stop offset="55%" stop-color="#123b7a"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fde68a"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="18" fill="url(#g)"/>
+  <path d="M18 14v34h19" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M46 21c-2.4-2.7-6-4.4-10.2-4.4-6.7 0-11.3 3.8-11.3 8.9 0 12.8 20.4 7 20.4 17 0 4.8-4.3 8.7-10.8 8.7-4.7 0-8.9-1.7-11.8-4.8" fill="none" stroke="#ffffff" stroke-width="4.3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M48 11l1.6 3.8L53.4 16l-3.8 1.3L48 21l-1.6-3.7L42.6 16l3.8-1.2L48 11z" fill="url(#gold)"/>
+</svg>`)};
+
+function applyLSBranding() {
+  if (typeof document === 'undefined') return;
+  document.title = 'Portal LS';
+  let link = document.querySelector('link[rel="icon"]');
+  if (!link) {
+    link = document.createElement('link');
+    link.setAttribute('rel', 'icon');
+    document.head.appendChild(link);
+  }
+  link.setAttribute('type', 'image/svg+xml');
+  link.setAttribute('href', LS_FAVICON);
+}
+
+function LSBrandMark({ size = 44, premium = false, className = '' }) {
+  const radius = premium ? 18 : 16;
+  return (
+    <div
+      className={`overflow-hidden shrink-0 ${className}`.trim()}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: premium ? 18 : 16,
+        boxShadow: premium
+          ? '0 14px 34px rgba(15, 23, 42, 0.28), 0 6px 14px rgba(37, 99, 235, 0.22)'
+          : '0 10px 24px rgba(37, 99, 235, 0.18)',
+      }}
+    >
+      <svg viewBox="0 0 64 64" width="100%" height="100%" role="img" aria-label="LS Tecnologia">
+        <defs>
+          <linearGradient id={`ls-bg-${size}-${premium ? 'p' : 'n'}`} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor={premium ? '#070f1f' : '#102a56'} />
+            <stop offset="52%" stopColor={premium ? '#123b7a' : '#1d4ed8'} />
+            <stop offset="100%" stopColor={premium ? '#4f46e5' : '#2563eb'} />
+          </linearGradient>
+          <linearGradient id={`ls-glow-${size}-${premium ? 'p' : 'n'}`} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.35" />
+            <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id={`ls-gold-${size}-${premium ? 'p' : 'n'}`} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#fef3c7" />
+            <stop offset="100%" stopColor="#f59e0b" />
+          </linearGradient>
+        </defs>
+        <rect x="2" y="2" width="60" height="60" rx={radius} fill={`url(#ls-bg-${size}-${premium ? 'p' : 'n'})`} />
+        <rect x="2" y="2" width="60" height="60" rx={radius} fill={`url(#ls-glow-${size}-${premium ? 'p' : 'n'})`} />
+        <rect x="2.5" y="2.5" width="59" height="59" rx={radius - 0.5} fill="none" stroke={premium ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.18)'} />
+        <path d="M18 14v34h19" fill="none" stroke="#ffffff" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M46 21c-2.4-2.7-6-4.4-10.2-4.4-6.7 0-11.3 3.8-11.3 8.9 0 12.8 20.4 7 20.4 17 0 4.8-4.3 8.7-10.8 8.7-4.7 0-8.9-1.7-11.8-4.8" fill="none" stroke="#ffffff" strokeWidth="4.3" strokeLinecap="round" strokeLinejoin="round" />
+        {premium && (
+          <>
+            <path d="M48 10.5l1.7 4L53.8 16l-4.1 1.4L48 21.5l-1.7-4.1L42.2 16l4.1-1.5L48 10.5z" fill={`url(#ls-gold-${size}-${premium ? 'p' : 'n'})`} />
+            <circle cx="50.5" cy="12.5" r="0.7" fill="#ffffff" fillOpacity="0.9" />
+          </>
+        )}
+      </svg>
+    </div>
+  );
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -111,6 +189,10 @@ export default function App() {
     setCurrentUser(data);
     return data;
   };
+
+  useEffect(() => {
+    applyLSBranding();
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -220,14 +302,14 @@ function LoginScreen({ onLogin }) {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_#2563eb_0,_#0f172a_42%,_#020617_75%)]"/>
         <div className="absolute -top-24 -right-24 w-96 h-96 bg-blue-500/20 blur-3xl rounded-full"/>
         <div className="relative z-10 max-w-xl text-white">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-blue-400/30 bg-blue-400/10 text-blue-200 text-xs font-normal mb-6"><Sparkles size={14}/> LS Tecnologia</div>
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-blue-400/30 bg-blue-400/10 text-blue-200 text-xs font-normal mb-6"><LSBrandMark size={16} className="rounded-lg"/> LS Tecnologia</div>
           <h1 className="text-5xl font-normal leading-tight tracking-tight">Tecnologia, execução e transparência em um só lugar.</h1>
           <p className="mt-6 text-slate-300 text-lg">Acompanhe projetos, aprovações, suporte e financeiro pelo Portal LS.</p>
         </div>
       </div>
       <div className="bg-slate-50 flex items-center justify-center p-5 sm:p-10">
         <form onSubmit={submit} className="w-full max-w-md bg-white border border-slate-200 rounded-[28px] shadow-2xl shadow-slate-900/10 p-7 sm:p-10">
-          <div className="w-12 h-12 rounded-2xl bg-slate-950 text-white flex items-center justify-center mb-7"><Sparkles size={22}/></div>
+          <LSBrandMark size={52} premium className="mb-7" />
           <h2 className="text-3xl font-normal text-slate-950">Portal LS</h2>
           <p className="text-slate-500 mt-2 mb-8">Área restrita para clientes e administradores.</p>
           {error && <Notice type="error">{error}</Notice>}
@@ -277,7 +359,7 @@ function PortalShell({ menu, currentView, setView, children, title }) {
     <div className="portal-ui min-h-screen bg-[#f5f7fb] text-slate-900">
       <aside className={`fixed inset-y-0 left-0 z-40 w-72 bg-slate-950 text-white transform transition-transform duration-300 lg:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="h-20 px-6 border-b border-white/10 flex items-center justify-between">
-          <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20"><Sparkles size={20}/></div><div><div className="font-normal tracking-tight">Portal LS</div><div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Tecnologia</div></div></div>
+          <div className="flex items-center gap-3"><LSBrandMark size={40} premium /><div><div className="font-normal tracking-tight">Portal LS</div><div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Tecnologia</div></div></div>
           <button onClick={()=>setMobileOpen(false)} className="lg:hidden text-slate-400"><X/></button>
         </div>
         <nav className="p-4 space-y-1 overflow-y-auto h-[calc(100vh-160px)]">
@@ -434,6 +516,7 @@ function AdminClients() {
     paymentPlan:''
   });
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
   const [message, setMessage] = useState('');
 
   const indexedCompanies = companies.map((company, index) => ({
@@ -517,20 +600,37 @@ function AdminClients() {
     }
   };
 
-  const remove = async id => {
-    if (!confirm('Excluir este cliente?')) return;
-
-    const r = await fetchSupabase(
-      `/rest/v1/companies?id=eq.${encodeURIComponent(id)}`,
-      { method:'DELETE' }
+  const remove = async c => {
+    const ok = confirm(
+      `Excluir o cliente "${c.name}"?\n\nEssa ação remove o cadastro do cliente do Portal LS e não pode ser desfeita.`
     );
+    if (!ok) return;
 
-    if (r.error) {
-      return alert('O cliente possui vínculos e não pôde ser excluído.');
+    setDeletingId(c.id);
+    setMessage('');
+
+    try {
+      const r = await fetchSupabase(
+        `/rest/v1/companies?id=eq.${encodeURIComponent(c.id)}`,
+        { method:'DELETE' }
+      );
+
+      if (r.error) {
+        throw new Error(
+          r.error.message ||
+          'Este cliente possui projetos, cobranças ou outros vínculos e não pôde ser excluído.'
+        );
+      }
+
+      setCompanies(x => x.filter(company => company.id !== c.id));
+      if (expandedId === c.id) setExpandedId(null);
+      if (editingId === c.id) setEditingId(null);
+      setMessage(`Cliente ${c.name} excluído com sucesso.`);
+    } catch (err) {
+      alert(err.message || 'Não foi possível excluir o cliente.');
+    } finally {
+      setDeletingId(null);
     }
-
-    setCompanies(x => x.filter(c => c.id !== id));
-    if (expandedId === id) setExpandedId(null);
   };
 
   const toggleExpand = id => {
@@ -749,10 +849,11 @@ function AdminClients() {
                       <div className="sm:col-span-2 xl:col-span-4 flex justify-between gap-2 mt-1 pt-3 border-t border-slate-100">
                         <button
                           type="button"
-                          onClick={() => remove(c.id)}
-                          className="mini-btn text-red-600"
+                          onClick={() => remove(c)}
+                          disabled={deletingId === c.id}
+                          className="mini-btn mini-btn-danger"
                         >
-                          Excluir
+                          {deletingId === c.id ? 'Excluindo...' : 'Excluir cliente'}
                         </button>
 
                         <div className="flex gap-2">
@@ -828,7 +929,16 @@ function AdminClients() {
                         </div>
                       </div>
 
-                      <div className="flex justify-end mt-3 pt-3 border-t border-slate-100">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-3 pt-3 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => remove(c)}
+                          disabled={deletingId === c.id}
+                          className="mini-btn mini-btn-danger"
+                        >
+                          {deletingId === c.id ? 'Excluindo...' : 'Excluir cliente'}
+                        </button>
+
                         <button
                           type="button"
                           onClick={() => beginEdit(c)}
@@ -2263,12 +2373,17 @@ function GlobalStyles(){return <style>{`
   .input{width:100%;border:1px solid rgb(203 213 225);background:white;border-radius:10px;padding:.58rem .7rem;outline:none;transition:.2s;color:rgb(15 23 42);font-size:.76rem}
   .compact-input{padding:.48rem .6rem;font-size:.72rem;border-radius:9px}
   .input:focus{border-color:rgb(59 130 246);box-shadow:0 0 0 3px rgba(59,130,246,.08)}
+  button{transform-origin:center;touch-action:manipulation}
+  button:not(:disabled){transition:transform .08s ease,box-shadow .12s ease,filter .12s ease,background-color .12s ease,border-color .12s ease}
+  button:not(:disabled):active{transform:translateY(1px) scale(.965);box-shadow:inset 0 2px 5px rgba(15,23,42,.16)!important}
+  button:disabled{cursor:not-allowed}
   .btn-primary,.btn-dark,.btn-secondary{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;border-radius:10px;padding:.56rem .78rem;font-size:.74rem;font-weight:400;transition:.2s}
   .btn-primary{background:linear-gradient(135deg,#2563eb,#4f46e5);color:white;box-shadow:0 7px 14px rgba(37,99,235,.14)}
   .btn-primary:hover{filter:brightness(.95)} .btn-primary:disabled{opacity:.55}
   .btn-dark{background:#0f172a;color:white}.btn-secondary{background:white;border:1px solid #cbd5e1;color:#334155}
   .mini-btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid #e2e8f0;background:white;color:#475569;border-radius:8px;padding:.38rem .58rem;font-size:.66rem;line-height:1;transition:.2s}
   .mini-btn:hover{background:#f8fafc}.mini-btn-primary{background:#0f172a;color:white;border-color:#0f172a}.mini-btn-primary:hover{background:#1e293b}
+  .mini-btn-danger{background:#fff1f2;color:#be123c;border-color:#fecdd3}.mini-btn-danger:hover{background:#ffe4e6;border-color:#fda4af;color:#9f1239}.mini-btn-danger:disabled{opacity:.55}
   .mini-card{background:#f8fafc;border:1px solid #f1f5f9;border-radius:10px;padding:.55rem .65rem;min-width:0}
   .mini-card span{display:block;font-size:.58rem;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:.18rem}
   .mini-card b{display:block;font-size:.7rem;line-height:1rem;font-weight:400;color:#334155;overflow-wrap:anywhere}
