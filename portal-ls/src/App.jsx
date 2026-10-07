@@ -408,9 +408,30 @@ function AdminDashboard() {
   const openFinancials = financials.filter(f => f.status === 'pending' || f.status === 'in_review');
   const overdue = pending.filter(f => f.dueDate && new Date(`${f.dueDate}T23:59:59`) < new Date());
   const now = new Date();
-  const receivedMonth = financials
+  const installmentsReceivedMonth = financials
     .filter(f => f.status === 'paid' && f.paidAt && new Date(f.paidAt).getMonth() === now.getMonth() && new Date(f.paidAt).getFullYear() === now.getFullYear())
     .reduce((s, f) => s + Number(f.amount || 0), 0);
+
+  const paidDevelopmentCompanyIdsThisMonth = new Set(
+    projects
+      .filter(p => {
+        if (!p.developmentPaid || !p.developmentPaidDate) return false;
+        const paidDate = new Date(`${String(p.developmentPaidDate).slice(0,10)}T12:00:00`);
+        return paidDate.getMonth() === now.getMonth() && paidDate.getFullYear() === now.getFullYear();
+      })
+      .map(p => p.companyId)
+      .filter(Boolean)
+  );
+
+  const developmentsReceivedMonth = companies
+    .filter(c => paidDevelopmentCompanyIdsThisMonth.has(c.id))
+    .reduce((sum, c) => {
+      const paidValue = Number(c.developmentPaidAmount || 0);
+      const totalValue = Number(c.developmentAmount || 0);
+      return sum + (paidValue > 0 ? paidValue : totalValue);
+    }, 0);
+
+  const receivedMonth = installmentsReceivedMonth + developmentsReceivedMonth;
   const toReceive = openFinancials.reduce((s, f) => s + Number(f.amount || 0), 0);
   const waitingClient = projects.filter(p => p.stage === 'waiting_client').length;
   const activeProjects = projects.filter(p => p.status !== 'closed');
