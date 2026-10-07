@@ -322,12 +322,14 @@ function AdminPortal() {
 function AdminDashboard() {
   const { companies, projects, tickets, financials } = useContext(AppContext);
   const pending = financials.filter(f => f.status === 'pending');
+  const inReview = financials.filter(f => f.status === 'in_review');
+  const openFinancials = financials.filter(f => f.status === 'pending' || f.status === 'in_review');
   const overdue = pending.filter(f => f.dueDate && new Date(`${f.dueDate}T23:59:59`) < new Date());
   const now = new Date();
   const receivedMonth = financials
     .filter(f => f.status === 'paid' && f.paidAt && new Date(f.paidAt).getMonth() === now.getMonth() && new Date(f.paidAt).getFullYear() === now.getFullYear())
     .reduce((s, f) => s + Number(f.amount || 0), 0);
-  const toReceive = pending.reduce((s, f) => s + Number(f.amount || 0), 0);
+  const toReceive = openFinancials.reduce((s, f) => s + Number(f.amount || 0), 0);
   const waitingClient = projects.filter(p => p.stage === 'waiting_client').length;
   const activeProjects = projects.filter(p => p.status !== 'closed');
 
@@ -383,6 +385,7 @@ function AdminDashboard() {
       <Metric icon={CircleDollarSign} label="A receber" value={money(toReceive)}/>
       <Metric icon={Banknote} label="Recebido no mês" value={money(receivedMonth)}/>
       <Metric icon={AlertCircle} label="Vencidos" value={overdue.length}/>
+      <Metric icon={Receipt} label="Em análise" value={inReview.length}/>
       <Metric icon={Gauge} label="Progresso médio" value={`${Math.round(projects.length ? projects.reduce((s,p) => s + Number(p.progress || 0), 0) / projects.length : 0)}%`}/>
     </div>
 
@@ -398,11 +401,15 @@ function AdminDashboard() {
           <div className="space-y-4">{activeProjects.slice(0,6).map(p => <ProjectCompact key={p.id} p={p} company={companies.find(c => c.id === p.companyId)}/>)}</div>}
       </Panel>
       <Panel title="Financeiro prioritário" icon={Receipt}>
-        {pending.length === 0 ? <p className="text-sm text-slate-400">Nenhuma cobrança pendente.</p> :
-          <div className="space-y-3">{[...pending].sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0,6).map(f =>
+        {openFinancials.length === 0 ? <p className="text-sm text-slate-400">Nenhuma cobrança em aberto.</p> :
+          <div className="space-y-3">{[...openFinancials].sort((a,b) => {
+            if (a.status === 'in_review' && b.status !== 'in_review') return -1;
+            if (a.status !== 'in_review' && b.status === 'in_review') return 1;
+            return new Date(a.dueDate) - new Date(b.dueDate);
+          }).slice(0,6).map(f =>
             <div key={f.id} className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-slate-50">
               <div><div className="text-slate-800">{companies.find(c => c.id === f.companyId)?.name || 'Cliente'}</div><div className="text-xs text-slate-500 mt-1">{f.description} • {dateBR(f.dueDate)}</div></div>
-              <div className="text-slate-950 whitespace-nowrap">{money(f.amount)}</div>
+              <div className="flex items-center gap-3"><PaymentStatus status={f.status}/><div className="text-slate-950 whitespace-nowrap">{money(f.amount)}</div></div>
             </div>)}
           </div>}
       </Panel>
@@ -567,7 +574,7 @@ function AdminClients() {
           const clientProjects = projects.filter(p => p.companyId === c.id);
           const clientFinancials = financials.filter(f => f.companyId === c.id);
           const pendingInstallmentsAmount = clientFinancials
-            .filter(f => f.status === 'pending')
+            .filter(f => f.status === 'pending' || f.status === 'in_review')
             .reduce((s,f) => s + Number(f.amount || 0), 0);
 
           const paidInstallmentsAmount = clientFinancials
@@ -1986,9 +1993,11 @@ function AdminFinancial() {
                             <div className="text-[8px] text-slate-400">
                               {item.status === 'paid'
                                 ? 'Paga'
-                                : overdue
-                                  ? 'Vencida'
-                                  : 'Pendente'}
+                                : item.status === 'in_review'
+                                  ? 'Em análise'
+                                  : overdue
+                                    ? 'Vencida'
+                                    : 'Pendente'}
                             </div>
                           </div>
 
@@ -2020,6 +2029,13 @@ function AdminFinancial() {
                                 className="mini-btn"
                               >
                                 Reabrir
+                              </button>
+                            ) : item.status === 'in_review' ? (
+                              <button
+                                onClick={() => markPaid(item.id)}
+                                className="mini-btn mini-btn-primary"
+                              >
+                                Aprovar pagamento
                               </button>
                             ) : (
                               <button
@@ -2148,7 +2164,7 @@ function ClientPortal(){
 }
 
 function ClientHome({go}){
-  const {currentUser,companies,projects,financials}=useContext(AppContext);const company=companies.find(c=>c.id===currentUser.companyId);const mine=projects.filter(p=>p.companyId===currentUser.companyId);const open=financials.filter(f=>f.companyId===currentUser.companyId&&f.status==='pending').sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));const next=open[0];
+  const {currentUser,companies,projects,financials}=useContext(AppContext);const company=companies.find(c=>c.id===currentUser.companyId);const mine=projects.filter(p=>p.companyId===currentUser.companyId);const open=financials.filter(f=>f.companyId===currentUser.companyId&&(f.status==='pending'||f.status==='in_review')).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));const next=open.find(f=>f.status==='pending')||open[0];
   return <div className="space-y-7"><div className="relative overflow-hidden rounded-[28px] bg-slate-950 text-white p-7 sm:p-10"><div className="absolute right-0 top-0 w-72 h-72 bg-blue-500/20 blur-3xl rounded-full"/><div className="relative"><p className="text-blue-300 text-sm font-normal">{company?.name}</p><h2 className="text-3xl sm:text-4xl font-normal mt-2">Olá, {currentUser.name?.split(' ')[0]}.</h2><p className="text-slate-400 mt-3">Acompanhe o que está acontecendo agora com a LS.</p></div></div><div className="grid xl:grid-cols-3 gap-5"><div className="xl:col-span-2 space-y-5">{mine.map(p=><div key={p.id} className="card p-6"><div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3"><div><h3 className="font-normal text-xl">{p.name}</h3><div className="mt-2"><StageBadge stage={p.stage}/></div></div><div className="text-right"><div className="text-3xl font-normal">{Number(p.progress||0)}%</div><div className="text-xs text-slate-400">concluído</div></div></div><div className="mt-5"><Progress value={p.progress}/></div><div className="grid sm:grid-cols-2 gap-3 mt-5"><InfoCard label="Próximo passo" value={p.nextStep||'A definir'}/><InfoCard label="Previsão" value={dateBR(p.deadline)}/></div><button onClick={()=>go('projects')} className="mt-5 text-sm font-normal text-blue-700 flex items-center gap-1">Ver detalhes <ArrowRight size={15}/></button></div>)}</div><div className="space-y-5"><div className="card p-6"><div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center"><BadgeDollarSign/></div><h3 className="font-normal mt-4">Próxima cobrança</h3>{next?<><div className="text-2xl font-normal mt-3">{money(next.amount)}</div><div className="text-sm text-slate-500">{next.description}</div><div className="text-xs text-slate-400 mt-2">Vencimento {dateBR(next.dueDate)}</div><button onClick={()=>go('financial')} className="btn-primary w-full mt-5">Ver financeiro</button></>:<p className="text-sm text-slate-500 mt-3">Nenhuma pendência financeira.</p>}</div></div></div></div>;
 }
 
@@ -2162,7 +2178,7 @@ function ClientFinancial(){
   const {currentUser,financials,financialSettings}=useContext(AppContext);
   const [copied,setCopied]=useState(false);
   const mine=financials.filter(f=>f.companyId===currentUser.companyId).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
-  const pending=mine.filter(f=>f.status==='pending').reduce((sum,f)=>sum+Number(f.amount||0),0);
+  const pending=mine.filter(f=>f.status==='pending'||f.status==='in_review').reduce((sum,f)=>sum+Number(f.amount||0),0);
   const copyPix=async()=>{
     if(!financialSettings?.pix_key)return;
     try{await navigator.clipboard.writeText(financialSettings.pix_key);setCopied(true);setTimeout(()=>setCopied(false),1800);}catch{alert('Não foi possível copiar automaticamente. Selecione a chave PIX manualmente.');}
