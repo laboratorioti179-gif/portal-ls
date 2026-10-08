@@ -1,0 +1,16 @@
+{
+  "name": "Portal LS",
+  "short_name": "LS",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#155EEF",
+  "theme_color": "#155EEF",
+  "icons": [
+    {
+      "src": "/ls-home-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
