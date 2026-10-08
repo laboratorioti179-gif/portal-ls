@@ -155,17 +155,18 @@ export default function App() {
   const [financials, setFinancials] = useState([]);
   const [financialSettings, setFinancialSettings] = useState(null);
   const [approvals, setApprovals] = useState([]);
+  const [oneTimeSales, setOneTimeSales] = useState([]);
 
   const clearData = () => {
     setCompanies([]); setUsers([]); setProjects([]); setTickets([]);
-    setHistory([]); setFinancials([]); setFinancialSettings(null); setApprovals([]);
+    setHistory([]); setFinancials([]); setFinancialSettings(null); setApprovals([]); setOneTimeSales([]);
   };
 
   const loadData = async () => {
     const endpoints = [
       ['companies', setCompanies], ['profiles', setUsers], ['projects', setProjects],
       ['tickets', setTickets], ['history', setHistory], ['financials', setFinancials],
-      ['approvals', setApprovals],
+      ['approvals', setApprovals], ['one_time_sales', setOneTimeSales],
     ];
     const results = await Promise.all(endpoints.map(async ([table, setter]) => {
       const result = await fetchSupabase(`/rest/v1/${table}?select=*`);
@@ -249,7 +250,7 @@ export default function App() {
   const ctx = {
     currentUser, companies, setCompanies, users, setUsers, projects, setProjects,
     tickets, setTickets, history, setHistory, financials, setFinancials,
-    financialSettings, setFinancialSettings, approvals, setApprovals, fetchSupabase, createManagedUser, generateId,
+    financialSettings, setFinancialSettings, approvals, setApprovals, oneTimeSales, setOneTimeSales, fetchSupabase, createManagedUser, generateId,
     refreshData: loadData, logout, supabase,
   };
 
@@ -386,14 +387,14 @@ function AdminPortal() {
   const [view, setView] = useState('dashboard');
   const menu = [
     {id:'dashboard',label:'Visão geral',icon:LayoutDashboard}, {id:'clients',label:'Clientes',icon:Users},
-    {id:'projects',label:'Desenvolvimentos',icon:FolderKanban}, {id:'financial',label:'Financeiro',icon:WalletCards},
+    {id:'projects',label:'Desenvolvimentos',icon:FolderKanban}, {id:'sales',label:'Vendas avulsas',icon:BadgeDollarSign}, {id:'financial',label:'Financeiro',icon:WalletCards},
     {id:'financial-settings',label:'Config. financeiro',icon:Settings},
     {id:'register-company',label:'Cadastrar cliente',icon:Building2},
     {id:'register-admin',label:'Cadastrar admin',icon:ShieldCheck},
   ];
   const titles = Object.fromEntries(menu.map(x=>[x.id,x.label]));
   const content = {
-    dashboard:<AdminDashboard/>, clients:<AdminClients/>, projects:<AdminProjects/>, financial:<AdminFinancial/>,
+    dashboard:<AdminDashboard/>, clients:<AdminClients/>, projects:<AdminProjects/>, sales:<AdminOneTimeSales/>, financial:<AdminFinancial/>,
     'financial-settings':<AdminFinancialSettings/>, 'register-company':<AdminRegisterCompany onDone={()=>setView('clients')}/>,
     'register-admin':<AdminRegisterAdmin/>,
   }[view];
@@ -401,7 +402,7 @@ function AdminPortal() {
 }
 
 function AdminDashboard() {
-  const { companies, projects, financials } = useContext(AppContext);
+  const { companies, projects, financials, oneTimeSales } = useContext(AppContext);
   const pending = financials.filter(f => f.status === 'pending');
   const inReview = financials.filter(f => f.status === 'in_review');
   const openFinancials = financials.filter(f => f.status === 'pending' || f.status === 'in_review');
@@ -435,8 +436,15 @@ function AdminDashboard() {
     .reduce((sum, c) => sum + Number(c.developmentPaidAmount || 0), 0);
 
   const developmentsReceivedMonth = developmentsReceivedFromProjects + developmentsReceivedFromCompanies;
-  const receivedMonth = installmentsReceivedMonth + developmentsReceivedMonth;
-  const toReceive = openFinancials.reduce((s, f) => s + Number(f.amount || 0), 0);
+  const avulsoReceivedMonth = oneTimeSales
+    .filter(s => s.paidAt && Number(s.paidAmount || 0) > 0 &&
+      new Date(s.paidAt).getMonth() === now.getMonth() &&
+      new Date(s.paidAt).getFullYear() === now.getFullYear())
+    .reduce((total, s) => total + Number(s.paidAmount || 0), 0);
+  const receivedMonth = installmentsReceivedMonth + developmentsReceivedMonth + avulsoReceivedMonth;
+  const salesReceivable = oneTimeSales.reduce((total, sale) =>
+    total + Math.max(0, Number(sale.amount || 0) - Number(sale.paidAmount || 0)), 0);
+  const toReceive = openFinancials.reduce((s, f) => s + Number(f.amount || 0), 0) + salesReceivable;
   const waitingClient = projects.filter(p => p.stage === 'waiting_client').length;
   const activeProjects = projects.filter(p => p.status !== 'closed');
   const averageProgress = Math.round(projects.length ? projects.reduce((s,p) => s + Number(p.progress || 0), 0) / projects.length : 0);
@@ -489,7 +497,8 @@ function AdminDashboard() {
       <Metric icon={FolderKanban} label="Projetos ativos" value={activeProjects.length}/>
       <Metric icon={Clock3} label="Aguardando cliente" value={waitingClient}/>
       <Metric icon={CircleDollarSign} label="A receber" value={money(toReceive)}/>
-      <Metric icon={Banknote} label="Recebido no mês" value={money(receivedMonth)}/>
+       <Metric icon={Banknote} label="Recebido no mês" value={money(receivedMonth)}/>
+       <Metric icon={BadgeDollarSign} label="Vendas avulsas recebidas" value={money(avulsoReceivedMonth)}/>
       <Metric icon={AlertCircle} label="Vencidos" value={overdue.length}/>
       <Metric icon={Receipt} label="Em análise" value={inReview.length}/>
       <Metric icon={Gauge} label="Progresso médio" value={`${averageProgress}%`}/>
@@ -1163,6 +1172,99 @@ function AdminProjects() {
   const addUpdate=async e=>{e.preventDefault();if(!newUpdate.trim())return;const item={id:generateId('HST'),projectId:selected.id,description:newUpdate.trim(),date:new Date().toISOString()};const r=await fetchSupabase('/rest/v1/history',{method:'POST',body:JSON.stringify(item)});if(r.error)return alert('Erro ao salvar atualização');setHistory(x=>[item,...x]);setNewUpdate('');};
   if(selected&&form){const company=companies.find(c=>c.id===selected.companyId);const h=history.filter(x=>x.projectId===selected.id).sort((a,b)=>new Date(b.date)-new Date(a.date));return <div className="space-y-6"><button className="text-sm font-normal text-blue-700" onClick={()=>setSelected(null)}>← Voltar</button><div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4"><div><h2 className="page-title">{selected.name}</h2><p className="page-subtitle">{company?.name}</p></div><StageBadge stage={form.stage}/></div><div className="grid xl:grid-cols-[1.2fr_.8fr] gap-6"><form onSubmit={save} className="card p-6 space-y-5"><div className="grid sm:grid-cols-2 gap-4"><Field label="Etapa"><select className="input" value={form.stage} onChange={e=>setForm({...form,stage:e.target.value})}>{PROJECT_STAGES.map(([v,l])=><option value={v} key={v}>{l}</option>)}</select></Field><Field label="Status"><select className="input" value={form.status||'active'} onChange={e=>setForm({...form,status:e.target.value})}><option value="active">Ativo</option><option value="paused">Pausado</option><option value="closed">Encerrado</option></select></Field><Field label="Progresso (%)"><input className="input" type="number" min="0" max="100" value={form.progress} onChange={e=>setForm({...form,progress:e.target.value})}/></Field><Field label="Previsão de entrega"><input className="input" type="date" value={form.deadline||''} onChange={e=>setForm({...form,deadline:e.target.value})}/></Field><Field label="Pagamento do desenvolvimento"><select className="input" value={form.developmentPaymentStatus||'unpaid'} onChange={e=>setForm({...form,developmentPaymentStatus:e.target.value,developmentPaidAmount:e.target.value==='unpaid'?'':form.developmentPaidAmount,developmentPaidDate:e.target.value==='unpaid'?'':form.developmentPaidDate})}><option value="unpaid">Não pago</option><option value="partial">Pago parcialmente</option><option value="paid">Pago integralmente</option></select></Field><Field label="Valor pago"><input className="input" inputMode="decimal" placeholder="Ex: 1200,00" value={form.developmentPaidAmount||''} onChange={e=>setForm({...form,developmentPaidAmount:e.target.value})} disabled={(form.developmentPaymentStatus||'unpaid')==='unpaid'}/></Field><Field label="Data do pagamento"><input className="input" type="date" value={form.developmentPaidDate||''} onChange={e=>setForm({...form,developmentPaidDate:e.target.value})} disabled={(form.developmentPaymentStatus||'unpaid')==='unpaid'}/></Field></div><Progress value={form.progress}/><Field label="Próximo passo"><input className="input" value={form.nextStep||''} onChange={e=>setForm({...form,nextStep:e.target.value})} placeholder="Ex: Aprovação do layout pelo cliente"/></Field><Field label="Observação visível ao cliente"><textarea className="input min-h-28" value={form.observation||''} onChange={e=>setForm({...form,observation:e.target.value})}/></Field><button className="btn-primary" disabled={loading}>Salvar andamento</button></form><div className="space-y-6"><form onSubmit={addUpdate} className="card p-6"><h3 className="font-normal mb-4">Nova atualização</h3><textarea className="input min-h-28" value={newUpdate} onChange={e=>setNewUpdate(e.target.value)} placeholder="Ex: Integração concluída e enviada para testes."/><button className="btn-dark mt-3">Registrar no histórico</button></form><Panel title="Histórico" icon={History}><div className="space-y-4 max-h-[420px] overflow-auto">{h.map(i=><div key={i.id} className="border-l-2 border-blue-200 pl-4"><p className="text-sm font-normal">{i.description}</p><p className="text-xs text-slate-400 mt-1">{new Date(i.date).toLocaleString('pt-BR')}</p></div>)}</div></Panel></div></div></div>}
   return <div className="space-y-6"><div className="flex flex-col sm:flex-row justify-between gap-4"><div><h2 className="page-title">Desenvolvimentos</h2><p className="page-subtitle">Controle etapa, prazo, progresso e próximo passo.</p></div><button onClick={()=>setAdding(!adding)} className="btn-primary"><Plus size={17}/> Novo projeto</button></div>{adding&&<form onSubmit={create} className="card p-5 grid md:grid-cols-3 gap-4"><Field label="Projeto"><input className="input" value={newP.name} onChange={e=>setNewP({...newP,name:e.target.value})} required/></Field><Field label="Cliente"><select className="input" value={newP.companyId} onChange={e=>setNewP({...newP,companyId:e.target.value})} required><option value="">Selecione...</option>{companies.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></Field><div className="flex items-end"><button className="btn-primary w-full" disabled={loading}>Criar</button></div></form>}<div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5">{projects.map(p=><button key={p.id} onClick={()=>open(p)} className="card p-6 text-left hover:-translate-y-0.5 transition-transform"><div className="flex justify-between gap-3"><div className="w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center"><FolderKanban/></div><StageBadge stage={p.stage}/></div><h3 className="font-normal text-lg mt-5">{p.name}</h3><p className="text-sm text-slate-500">{companies.find(c=>c.id===p.companyId)?.name}</p><div className="mt-5"><Progress value={p.progress}/></div><div className="mt-4 flex justify-between text-xs text-slate-500"><span>Entrega: {dateBR(p.deadline)}</span><span>{Number(p.progress||0)}%</span></div><div className="mt-4 p-3 rounded-xl bg-slate-50 text-sm"><span className="font-normal">Próximo:</span> {p.nextStep||'Não definido'}</div><div className={`mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] ${(p.developmentPaymentStatus||'unpaid')==='paid'?'bg-emerald-50 text-emerald-700':(p.developmentPaymentStatus||'unpaid')==='partial'?'bg-blue-50 text-blue-700':'bg-amber-50 text-amber-700'}`}>{(p.developmentPaymentStatus||'unpaid')==='paid'?<><CheckCircle2 size={13}/> Pago integralmente{Number(p.developmentPaidAmount||0)>0?` • ${money(p.developmentPaidAmount)}`:''}{p.developmentPaidDate?` • ${dateBR(p.developmentPaidDate)}`:''}</>:(p.developmentPaymentStatus||'unpaid')==='partial'?<><Banknote size={13}/> Parcial • {money(p.developmentPaidAmount)}{p.developmentPaidDate?` • ${dateBR(p.developmentPaidDate)}`:''}</>:<><Clock3 size={13}/> Pagamento pendente</>}</div></button>)}</div></div>;
+}
+
+
+const SALES_CATEGORIES = ['Impressão 3D', 'Venda de código', 'Venda de JSON', 'Consultoria', 'Outros'];
+const emptySale = () => ({category:'Impressão 3D', description:'', clientName:'', companyId:'', amount:'', cost:'0', paidAmount:'0', paidAt:'', saleDate:new Date().toISOString().slice(0,10), notes:''});
+const parseSaleAmount = value => {
+  const input = String(value ?? '').trim().replace(/\s/g,'');
+  if (!input) return 0;
+  const normalized = input.includes(',') ? input.replace(/\./g,'').replace(',','.') : input;
+  return Number(normalized);
+};
+function AdminOneTimeSales() {
+  const {oneTimeSales, setOneTimeSales, companies, fetchSupabase, generateId} = useContext(AppContext);
+  const [form,setForm] = useState(emptySale);
+  const [editingId,setEditingId] = useState(null);
+  const [loading,setLoading] = useState(false);
+  const [error,setError] = useState('');
+  const [filter,setFilter] = useState('all');
+  const change = (key,value) => setForm(prev=>({...prev,[key]:value}));
+  const editing = Boolean(editingId);
+  const reset = () => {setForm(emptySale());setEditingId(null);setError('');};
+  const totalRevenue = oneTimeSales.reduce((a,s)=>a+Number(s.amount||0),0);
+  const totalPaid = oneTimeSales.reduce((a,s)=>a+Number(s.paidAmount||0),0);
+  const totalCost = oneTimeSales.reduce((a,s)=>a+Number(s.cost||0),0);
+  const totalProfit = totalRevenue - totalCost;
+  const statusOf = s => Number(s.paidAmount||0) >= Number(s.amount||0) ? 'Pago' : Number(s.paidAmount||0)>0 ? 'Parcial' : 'Pendente';
+  const filtered = oneTimeSales.filter(s=>filter==='all'||(filter==='pending' ? statusOf(s)!=='Pago':statusOf(s)==='Pago'))
+    .sort((a,b)=>String(b.saleDate||'').localeCompare(String(a.saleDate||'')));
+  const edit = sale => {
+    setEditingId(sale.id);
+    setForm({category:sale.category,description:sale.description||'',clientName:sale.clientName||'',companyId:sale.companyId||'',amount:String(sale.amount??''),cost:String(sale.cost??0),paidAmount:String(sale.paidAmount??0),paidAt:sale.paidAt?String(sale.paidAt).slice(0,10):'',saleDate:sale.saleDate||'',notes:sale.notes||''});
+    setError('');window.scrollTo({top:0,behavior:'smooth'});
+  };
+  const save = async e => {
+    e.preventDefault();setError('');
+    const amount=parseSaleAmount(form.amount), cost=parseSaleAmount(form.cost), paidAmount=parseSaleAmount(form.paidAmount);
+    if (!form.description.trim()) return setError('Informe o nome do produto ou serviço.');
+    if (![amount,cost,paidAmount].every(Number.isFinite)||amount<=0||cost<0||paidAmount<0||paidAmount>amount) return setError('Confira os valores. O pagamento não pode superar o total da venda.');
+    if (paidAmount>0&&!form.paidAt) return setError('Informe a data do valor recebido.');
+    if (!form.saleDate) return setError('Informe a data da venda.');
+    const item={category:form.category,description:form.description.trim(),clientName:form.clientName.trim()||null,companyId:form.companyId||null,amount,cost,paidAmount,paidAt:paidAmount?form.paidAt:null,saleDate:form.saleDate,notes:form.notes.trim()||null};
+    setLoading(true);
+    try {
+      const record=editing?item:{id:generateId('SALE'),...item};
+      const url=editing?`/rest/v1/one_time_sales?id=eq.${encodeURIComponent(editingId)}`:'/rest/v1/one_time_sales';
+      const result=await fetchSupabase(url,{method:editing?'PATCH':'POST',body:JSON.stringify(record)});
+      if (result.error) throw new Error(result.error.message||'Não foi possível salvar a venda.');
+      if (editing) setOneTimeSales(old=>old.map(s=>s.id===editingId?{...s,...item}:s));
+      else setOneTimeSales(old=>[record,...old]);
+      reset();
+    } catch(err){setError(err.message||'Erro ao salvar.');}
+    finally {setLoading(false);}
+  };
+  const remove = async sale => {
+    if (!window.confirm(`Excluir a venda "${sale.description}"?`))return;
+    const r=await fetchSupabase(`/rest/v1/one_time_sales?id=eq.${encodeURIComponent(sale.id)}`,{method:'DELETE'});
+    if(r.error)return setError(r.error.message||'Erro ao excluir venda.');
+    setOneTimeSales(old=>old.filter(s=>s.id!==sale.id));
+    if(editingId===sale.id)reset();
+  };
+  return <div className="space-y-5">
+    <div><h2 className="page-title">Vendas avulsas</h2><p className="page-subtitle">Produtos e serviços com pagamento único, sem mensalidade nem cobrança automática.</p></div>
+    <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+      <Metric icon={BadgeDollarSign} label="Vendas registradas" value={money(totalRevenue)}/>
+      <Metric icon={Banknote} label="Recebido" value={money(totalPaid)}/>
+      <Metric icon={Clock3} label="A receber" value={money(totalRevenue-totalPaid)}/>
+      <Metric icon={CircleDollarSign} label="Lucro estimado total" value={money(totalProfit)}/>
+    </div>
+    <form onSubmit={save} className="card p-4 sm:p-6 space-y-4">
+      <div className="flex justify-between items-center gap-3"><h3 className="text-lg">{editing?'Editar venda':'Cadastrar venda avulsa'}</h3>{editing&&<button type="button" onClick={reset} className="mini-btn">Cancelar edição</button>}</div>
+      {error&&<Notice type="error">{error}</Notice>}
+      <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
+        <Field label="Categoria"><select className="input" value={form.category} onChange={e=>change('category',e.target.value)}>{SALES_CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></Field>
+        <Field label="Produto ou serviço"><input className="input" value={form.description} onChange={e=>change('description',e.target.value)} placeholder="Ex: Suporte de celular 3D" required/></Field>
+        <Field label="Cliente cadastrado (opcional)"><select className="input" value={form.companyId} onChange={e=>change('companyId',e.target.value)}><option value="">Venda sem cadastro</option>{companies.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
+        <Field label="Nome do comprador (opcional)"><input className="input" value={form.clientName} onChange={e=>change('clientName',e.target.value)} placeholder="Nome ou marketplace"/></Field>
+        <Field label="Valor da venda (R$)"><input className="input" inputMode="decimal" value={form.amount} onChange={e=>change('amount',e.target.value)} required placeholder="150,00"/></Field>
+        <Field label="Custo total (R$)"><input className="input" inputMode="decimal" value={form.cost} onChange={e=>change('cost',e.target.value)} placeholder="35,00"/></Field>
+        <Field label="Valor recebido (R$)"><input className="input" inputMode="decimal" value={form.paidAmount} onChange={e=>change('paidAmount',e.target.value)} placeholder="0,00"/></Field>
+        <Field label="Data da venda"><input className="input" type="date" value={form.saleDate} onChange={e=>change('saleDate',e.target.value)} required/></Field>
+        <Field label="Data do recebimento"><input className="input" type="date" value={form.paidAt} onChange={e=>change('paidAt',e.target.value)}/></Field>
+      </div>
+      <Field label="Observações"><textarea className="input min-h-20" value={form.notes} onChange={e=>change('notes',e.target.value)} placeholder="Entrega, canal de venda, taxas, detalhes..."/></Field>
+      <div className="flex flex-wrap items-center justify-between gap-3"><span className="text-sm text-slate-600">Lucro estimado: <strong>{money(parseSaleAmount(form.amount)-parseSaleAmount(form.cost))}</strong></span><button disabled={loading} className="btn-primary">{loading?'Salvando...':editing?'Salvar alterações':'Registrar venda'}</button></div>
+    </form>
+    <div className="card p-4 sm:p-6 space-y-4">
+      <div className="flex flex-wrap gap-3 items-center justify-between"><h3 className="text-lg">Histórico de vendas</h3><select className="input w-auto" value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">Todas</option><option value="paid">Pagas</option><option value="pending">Com saldo pendente</option></select></div>
+      {!filtered.length?<p className="text-sm text-slate-500">Nenhuma venda encontrada.</p>:<div className="space-y-2">{filtered.map(s=><div key={s.id} className="rounded-xl border border-slate-200 p-3 flex flex-col sm:flex-row sm:justify-between gap-3">
+        <div className="min-w-0"><p className="font-medium text-slate-900 break-words">{s.description}</p><p className="text-xs text-slate-500">{s.category} • {s.clientName||companies.find(c=>c.id===s.companyId)?.name||'Sem cliente cadastrado'} • {dateBR(s.saleDate)}</p><p className="text-xs mt-1">Valor: {money(s.amount)} · Custo: {money(s.cost)} · Lucro est.: {money(Number(s.amount||0)-Number(s.cost||0))}</p></div>
+        <div className="flex flex-wrap gap-2 items-center"><span className="text-xs text-slate-500">Recebido: {money(s.paidAmount)}</span><span className="status status-info">{statusOf(s)}</span><button type="button" onClick={()=>edit(s)} className="mini-btn">Editar</button><button type="button" onClick={()=>remove(s)} className="mini-btn mini-btn-danger">Excluir</button></div>
+      </div>)}</div>}
+    </div>
+  </div>;
 }
 
 function AdminFinancial() {
