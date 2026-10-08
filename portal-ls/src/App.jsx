@@ -66,36 +66,35 @@ const fetchSupabase = async (path, options = {}) => {
   }
 };
 
-const LS_FAVICON = `data:image/svg+xml,${encodeURIComponent(`
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <defs>
-    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#081224"/>
-      <stop offset="55%" stop-color="#123b7a"/>
-      <stop offset="100%" stop-color="#4f46e5"/>
-    </linearGradient>
-    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#fde68a"/>
-      <stop offset="100%" stop-color="#f59e0b"/>
-    </linearGradient>
-  </defs>
-  <rect width="64" height="64" rx="18" fill="url(#g)"/>
-  <path d="M18 14v34h19" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M46 21c-2.4-2.7-6-4.4-10.2-4.4-6.7 0-11.3 3.8-11.3 8.9 0 12.8 20.4 7 20.4 17 0 4.8-4.3 8.7-10.8 8.7-4.7 0-8.9-1.7-11.8-4.8" fill="none" stroke="#ffffff" stroke-width="4.3" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M48 11l1.6 3.8L53.4 16l-3.8 1.3L48 21l-1.6-3.7L42.6 16l3.8-1.2L48 11z" fill="url(#gold)"/>
-</svg>`)}`;
+const LS_FAVICON = '/ls-home-icon.png';
 
 function applyLSBranding() {
   if (typeof document === 'undefined') return;
   document.title = 'Portal LS';
-  let link = document.querySelector('link[rel="icon"]');
-  if (!link) {
-    link = document.createElement('link');
-    link.setAttribute('rel', 'icon');
-    document.head.appendChild(link);
+
+  const ensureLink = (rel, href, extra = {}) => {
+    let link = document.querySelector(`link[rel="${rel}"]`);
+    if (!link) {
+      link = document.createElement('link');
+      link.setAttribute('rel', rel);
+      document.head.appendChild(link);
+    }
+    link.setAttribute('href', href);
+    Object.entries(extra).forEach(([key, value]) => link.setAttribute(key, value));
+    return link;
+  };
+
+  ensureLink('icon', LS_FAVICON, { type: 'image/png' });
+  ensureLink('apple-touch-icon', LS_FAVICON, { sizes: '180x180' });
+  ensureLink('manifest', '/manifest.webmanifest');
+
+  let theme = document.querySelector('meta[name="theme-color"]');
+  if (!theme) {
+    theme = document.createElement('meta');
+    theme.setAttribute('name', 'theme-color');
+    document.head.appendChild(theme);
   }
-  link.setAttribute('type', 'image/svg+xml');
-  link.setAttribute('href', LS_FAVICON);
+  theme.setAttribute('content', '#155EEF');
 }
 
 function LSBrandMark({ size = 44, premium = false, className = '' }) {
@@ -372,11 +371,11 @@ function PortalShell({ menu, currentView, setView, children, title }) {
       </aside>
       {mobileOpen && <button aria-label="Fechar menu" className="fixed inset-0 z-30 bg-slate-950/50 lg:hidden" onClick={()=>setMobileOpen(false)}/>} 
       <main className="lg:pl-72 min-h-screen">
-        <header className="h-20 sticky top-0 z-20 bg-white/85 backdrop-blur-xl border-b border-slate-200 flex items-center px-4 sm:px-6 lg:px-10">
-          <button onClick={()=>setMobileOpen(true)} className="lg:hidden mr-4 w-10 h-10 rounded-xl border border-slate-200 flex items-center justify-center"><Menu size={20}/></button>
+        <header className="h-14 sm:h-20 sticky top-0 z-20 bg-white/85 backdrop-blur-xl border-b border-slate-200 flex items-center px-3 sm:px-6 lg:px-10">
+          <button onClick={()=>setMobileOpen(true)} className="lg:hidden mr-3 w-9 h-9 rounded-xl border border-slate-200 flex items-center justify-center"><Menu size={20}/></button>
           <div><p className="text-[11px] uppercase tracking-[0.18em] font-normal text-blue-600">LS Tecnologia</p><h1 className="font-normal text-slate-950">{title}</h1></div>
         </header>
-        <div className="p-4 sm:p-6 lg:p-10 max-w-[1600px] mx-auto">{children}</div>
+        <div className="p-3 sm:p-6 lg:p-10 max-w-[1600px] mx-auto">{children}</div>
       </main>
       <GlobalStyles />
     </div>
@@ -455,20 +454,20 @@ function AdminDashboard() {
   ] : [];
 
   const ChartCard = ({ title, total, data, empty }) => (
-    <div className="card p-5 sm:p-6">
+    <div className="card dashboard-chart-card p-3 sm:p-6">
       <div className="flex items-center justify-between gap-3 mb-2">
         <div>
           <p className="text-sm text-slate-500">{title}</p>
           <p className="text-2xl text-slate-950 mt-1">{total}</p>
         </div>
       </div>
-      <div className="h-52">
+      <div className="h-32 sm:h-52">
         {data.length === 0 ? (
           <div className="h-full flex items-center justify-center text-sm text-slate-400">{empty}</div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <Pie data={data} cx="50%" cy="50%" innerRadius={48} outerRadius={76} paddingAngle={3} dataKey="value" nameKey="name">
+              <Pie data={data} cx="50%" cy="50%" innerRadius="43%" outerRadius="69%" paddingAngle={3} dataKey="value" nameKey="name">
                 {data.map((entry, index) => <Cell key={`${entry.name}-${index}`} fill={entry.color} />)}
               </Pie>
               <RechartsTooltip formatter={(value, name) => [value, name]} />
@@ -479,13 +478,13 @@ function AdminDashboard() {
     </div>
   );
 
-  return <div className="space-y-8">
-    <section>
+  return <div className="dashboard-root space-y-4 sm:space-y-8">
+    <section className="dashboard-heading">
       <h2 className="text-3xl tracking-tight text-slate-950">Operação LS</h2>
       <p className="text-slate-500 mt-1">Clientes, desenvolvimentos e financeiro em uma única visão.</p>
     </section>
 
-    <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-5">
+    <div className="dashboard-metrics grid grid-cols-2 xl:grid-cols-4 gap-2 sm:gap-5">
       <Metric icon={Building2} label="Clientes" value={companies.length}/>
       <Metric icon={FolderKanban} label="Projetos ativos" value={activeProjects.length}/>
       <Metric icon={Clock3} label="Aguardando cliente" value={waitingClient}/>
@@ -496,13 +495,13 @@ function AdminDashboard() {
       <Metric icon={Gauge} label="Progresso médio" value={`${averageProgress}%`}/>
     </div>
 
-    <div className="grid md:grid-cols-3 gap-5">
+    <div className="dashboard-charts grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-5">
       <ChartCard title="Empresas atendidas" total={companies.length} data={companiesData} empty="Nenhum cliente cadastrado." />
       <ChartCard title="Projetos por cliente" total={projects.length} data={projectsData} empty="Nenhum projeto cadastrado." />
       <ChartCard title="Progresso médio" total={`${averageProgress}%`} data={progressData} empty="Nenhum projeto cadastrado." />
     </div>
 
-    <div className="grid xl:grid-cols-2 gap-6">
+    <div className="dashboard-panels grid xl:grid-cols-2 gap-4 sm:gap-6">
       <Panel title="Desenvolvimentos em andamento" icon={FolderKanban}>
         {activeProjects.length === 0 ? <p className="text-sm text-slate-400">Nenhum desenvolvimento ativo.</p> :
           <div className="space-y-4">{activeProjects.slice(0,6).map(p => <ProjectCompact key={p.id} p={p} company={companies.find(c => c.id === p.companyId)}/>)}</div>}
@@ -2411,7 +2410,7 @@ function ClientSupport(){
 
 function ClientProfile(){const {currentUser,companies}=useContext(AppContext);const c=companies.find(x=>x.id===currentUser.companyId);return <div className="max-w-3xl card p-7 sm:p-9"><div className="w-14 h-14 bg-slate-950 text-white rounded-2xl flex items-center justify-center"><Users/></div><h2 className="text-2xl font-normal mt-5">{currentUser.name}</h2><p className="text-slate-500">{currentUser.email}</p><div className="grid sm:grid-cols-2 gap-4 mt-7"><InfoCard label="Empresa" value={c?.name||'—'}/><InfoCard label="CNPJ" value={c?.cnpj||'—'}/><InfoCard label="Perfil" value="Cliente autorizado"/><InfoCard label="ID LS" value={c?.id||'—'}/></div></div>}
 
-function Metric({icon:Icon,label,value}){return <div className="card p-4 sm:p-5"><div className="flex items-center gap-3"><div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center flex-none"><Icon size={19}/></div><div className="min-w-0"><div className="text-[11px] uppercase tracking-wider font-normal text-slate-400">{label}</div><div className="text-xl sm:text-2xl font-normal truncate">{value}</div></div></div></div>}
+function Metric({icon:Icon,label,value}){return <div className="card metric-card p-3 sm:p-5"><div className="flex items-center gap-2 sm:gap-3"><div className="metric-icon w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center flex-none"><Icon size={17}/></div><div className="min-w-0"><div className="metric-label text-[9px] sm:text-[11px] uppercase tracking-wider font-normal text-slate-400 leading-tight">{label}</div><div className="metric-value text-sm sm:text-2xl font-normal truncate mt-0.5">{value}</div></div></div></div>}
 function MiniStat({label,value}){return <div className="bg-slate-50 rounded-xl p-3"><div className="font-normal text-xs sm:text-sm truncate">{value}</div><div className="text-[10px] text-slate-400 mt-1">{label}</div></div>}
 function Panel({title,icon:Icon,children}){return <section className="card p-6"><div className="flex items-center gap-2 mb-5"><div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center"><Icon size={17}/></div><h3 className="font-normal">{title}</h3></div>{children}</section>}
 function ProjectCompact({p,company}){return <div className="p-4 rounded-2xl border border-slate-100"><div className="flex justify-between gap-3"><div><div className="font-normal">{p.name}</div><div className="text-xs text-slate-400">{company?.name}</div></div><StageBadge stage={p.stage}/></div><div className="mt-4"><Progress value={p.progress}/></div></div>}
@@ -2453,5 +2452,23 @@ function GlobalStyles(){return <style>{`
   .page-title{font-size:1.25rem;line-height:1.55rem;font-weight:400;letter-spacing:-.025em;color:#0f172a}.page-subtitle{font-size:.72rem;color:#64748b;margin-top:.12rem}
   .status{display:inline-flex;align-items:center;justify-content:center;padding:.28rem .52rem;border-radius:999px;font-size:.61rem;font-weight:400;white-space:nowrap}
   .status-ok{background:#dcfce7;color:#15803d}.status-warn{background:#fff7ed;color:#c2410c}.status-info{background:#eff6ff;color:#1d4ed8}.status-muted{background:#f1f5f9;color:#64748b}
-  @media(max-width:640px){.portal-ui{font-size:12px}.page-title{font-size:1.15rem}.card{border-radius:14px}}
+  @media(max-width:640px){
+    .portal-ui{font-size:11.5px}
+    .page-title{font-size:1.08rem}
+    .card{border-radius:13px}
+    .dashboard-root{gap:.75rem}
+    .dashboard-heading h2{font-size:1.05rem!important;line-height:1.2rem!important}
+    .dashboard-heading p{font-size:.58rem!important;line-height:.82rem!important;margin-top:.1rem!important}
+    .dashboard-metrics{gap:.48rem!important}
+    .metric-card{min-height:64px;padding:.62rem!important}
+    .metric-label{font-size:.52rem!important;letter-spacing:.055em!important}
+    .metric-value{font-size:.84rem!important;line-height:1rem!important}
+    .metric-icon{width:30px!important;height:30px!important;border-radius:10px!important}
+    .dashboard-chart-card{padding:.7rem!important}
+    .dashboard-chart-card .text-sm{font-size:.62rem!important}
+    .dashboard-chart-card .text-2xl{font-size:.9rem!important;line-height:1.05rem!important}
+    .dashboard-charts{gap:.6rem!important}
+    .dashboard-panels{gap:.7rem!important}
+    .dashboard-panels .card{padding:.8rem!important}
+  }
 `}</style>}
