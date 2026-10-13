@@ -387,18 +387,111 @@ function AdminPortal() {
   const [view, setView] = useState('dashboard');
   const menu = [
     {id:'dashboard',label:'Visão geral',icon:LayoutDashboard}, {id:'clients',label:'Clientes',icon:Users},
-    {id:'projects',label:'Desenvolvimentos',icon:FolderKanban}, {id:'sales',label:'Vendas avulsas',icon:BadgeDollarSign}, {id:'financial',label:'Financeiro',icon:WalletCards},
+    {id:'projects',label:'Desenvolvimentos',icon:FolderKanban}, {id:'autoprime',label:'AutoPrime',icon:Gauge}, {id:'sales',label:'Vendas avulsas',icon:BadgeDollarSign}, {id:'financial',label:'Financeiro',icon:WalletCards},
     {id:'financial-settings',label:'Config. financeiro',icon:Settings},
     {id:'register-company',label:'Cadastrar cliente',icon:Building2},
     {id:'register-admin',label:'Cadastrar admin',icon:ShieldCheck},
   ];
   const titles = Object.fromEntries(menu.map(x=>[x.id,x.label]));
   const content = {
-    dashboard:<AdminDashboard/>, clients:<AdminClients/>, projects:<AdminProjects/>, sales:<AdminOneTimeSales/>, financial:<AdminFinancial/>,
+    dashboard:<AdminDashboard/>, clients:<AdminClients/>, projects:<AdminProjects/>, autoprime:<AdminAutoPrime/>, sales:<AdminOneTimeSales/>, financial:<AdminFinancial/>,
     'financial-settings':<AdminFinancialSettings/>, 'register-company':<AdminRegisterCompany onDone={()=>setView('clients')}/>,
     'register-admin':<AdminRegisterAdmin/>,
   }[view];
   return <PortalShell menu={menu} currentView={view} setView={setView} title={titles[view]}>{content}</PortalShell>;
+}
+
+function AdminAutoPrime() {
+  const { fetchSupabase } = useContext(AppContext);
+  const [oficinas, setOficinas] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState('todos');
+  const [lastLoad, setLastLoad] = useState(null);
+
+  const loadMetrics = async () => {
+    setLoading(true);
+    setError('');
+    const { data, error: loadError } = await fetchSupabase('/rest/v1/autoprime_metrics?select=*&order=workshop_name.asc');
+    if (loadError) setError(loadError.message || 'Não foi possível carregar as métricas do AutoPrime.');
+    else { setOficinas(data || []); setLastLoad(new Date()); }
+    setLoading(false);
+  };
+
+  useEffect(() => { loadMetrics(); }, []);
+
+  const getStatus = (o) => {
+    if (o.pagamento_confirmado === true) return { key:'pago', label:'Pagamento confirmado', color:'bg-emerald-50 text-emerald-700' };
+    const expires = o.subscription_expires_at ? new Date(o.subscription_expires_at).getTime() : null;
+    if (o.subscription_status === 'Inativa' || (expires !== null && Number.isFinite(expires) && expires <= Date.now()))
+      return { key:'expirado', label:'Inativo / expirado', color:'bg-red-50 text-red-700' };
+    if (o.subscription_status === 'Trial') return { key:'teste', label:'Em teste', color:'bg-amber-50 text-amber-700' };
+    if (o.subscription_status === 'Ativa') return { key:'verificar', label:'Ativa sem pagamento confirmado', color:'bg-sky-50 text-sky-700' };
+    return { key:'verificar', label:'Verificar situação', color:'bg-slate-100 text-slate-700' };
+  };
+
+  const totais = useMemo(() => ({
+    cadastros: oficinas.length,
+    pagos: oficinas.filter(o => o.pagamento_confirmado === true).length,
+    emTeste: oficinas.filter(o => getStatus(o).key === 'teste').length,
+    naoUsaram: oficinas.filter(o => Number(o.total_orcamentos || 0) === 0).length,
+    semUsoEmTeste: oficinas.filter(o => getStatus(o).key === 'teste' && Number(o.total_orcamentos || 0) === 0).length,
+    orcamentos: oficinas.reduce((s,o)=>s+Number(o.total_orcamentos || 0),0),
+  }), [oficinas]);
+
+  const filtered = oficinas.filter(o => {
+    const query = search.trim().toLocaleLowerCase('pt-BR');
+    const found = !query || [o.workshop_name, o.email, o.phone, o.tenant_id].some(v => String(v || '').toLocaleLowerCase('pt-BR').includes(query));
+    const status = getStatus(o).key;
+    return found && (filter === 'todos' || (filter === 'sem_orcamento' ? Number(o.total_orcamentos || 0) === 0 : status === filter));
+  });
+
+  return <div className="space-y-5">
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div><h2 className="page-title">AutoPrime</h2><p className="page-subtitle">Cadastros, pagamentos e primeiro orçamento das oficinas.</p></div>
+      <button type="button" onClick={loadMetrics} disabled={loading} className="mini-btn mini-btn-primary flex items-center gap-2 self-start"><RefreshCw size={15} className={loading?'animate-spin':''}/> Atualizar dados</button>
+    </div>
+    {error && <Notice type="error">{error}</Notice>}
+    <div className="grid grid-cols-2 xl:grid-cols-3 gap-2 sm:gap-4">
+      <Metric icon={Users} label="Oficinas cadastradas" value={totais.cadastros}/>
+      <Metric icon={CheckCircle2} label="Pagamento confirmado" value={totais.pagos}/>
+      <Metric icon={Clock3} label="Em teste vigente" value={totais.emTeste}/>
+      <Metric icon={AlertCircle} label="Em teste sem orçamento" value={totais.semUsoEmTeste}/>
+      <Metric icon={FileText} label="Sem orçamento (total)" value={totais.naoUsaram}/>
+      <Metric icon={Receipt} label="Orçamentos criados" value={totais.orcamentos}/>
+    </div>
+    <div className="card p-4 sm:p-6 space-y-3">
+      <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
+        <h3 className="font-medium text-slate-900">Oficinas e ativação</h3>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input className="input compact-input" aria-label="Buscar oficinas" placeholder="Buscar oficina, e-mail ou telefone" value={search} onChange={e=>setSearch(e.target.value)}/>
+          <select className="input compact-input" aria-label="Filtrar oficinas" value={filter} onChange={e=>setFilter(e.target.value)}>
+            <option value="todos">Todas</option><option value="teste">Em teste</option><option value="pago">Pagamento confirmado</option><option value="sem_orcamento">Sem orçamento</option><option value="expirado">Inativas / expiradas</option><option value="verificar">Verificar situação</option>
+          </select>
+        </div>
+      </div>
+      <p className="text-xs text-slate-500">Atualização automática do n8n: a cada hora. Última consulta: {lastLoad ? lastLoad.toLocaleString('pt-BR') : '—'}. Confirmação de pagamento não equivale necessariamente a assinatura recorrente vigente.</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs sm:text-sm">
+          <thead><tr className="border-b border-slate-200 text-slate-500"><th className="py-3 pr-4">Oficina</th><th className="py-3 pr-4">Situação</th><th className="py-3 pr-4">Orçamentos</th><th className="py-3 pr-4">Primeiro orçamento</th><th className="py-3">Fim do acesso</th></tr></thead>
+          <tbody>{filtered.map(o => {
+            const status = getStatus(o);
+            return <tr key={o.tenant_id} className="border-b border-slate-100 last:border-0 align-top">
+              <td className="py-3 pr-4"><div className="font-medium text-slate-900">{o.workshop_name || 'Oficina sem nome'}</div><div className="text-slate-500 text-xs break-all">{o.email || o.phone || 'Sem contato'}</div></td>
+              <td className="py-3 pr-4"><span className={`inline-flex rounded-full px-2 py-1 text-xs ${status.color}`}>{status.label}</span></td>
+              <td className="py-3 pr-4">{Number(o.total_orcamentos || 0)}</td>
+              <td className="py-3 pr-4">{dateBR(o.primeiro_orcamento)}</td>
+              <td className="py-3">{dateBR(o.subscription_expires_at)}</td>
+            </tr>;
+          })}</tbody>
+        </table>
+        {!loading && filtered.length === 0 && <div className="py-6 text-center text-sm text-slate-500">Nenhuma oficina encontrada.</div>}
+        {loading && <div className="py-6 text-center text-sm text-slate-500">Carregando métricas...</div>}
+      </div>
+    </div>
+    <p className="text-xs text-slate-500">A identificação de quem concluiu os 3 dias grátis sem usar o sistema depende de cadastro e vencimento consistentes. Não iniciamos mensagens automáticas pela Manuella neste painel.</p>
+  </div>;
 }
 
 function AdminDashboard() {
