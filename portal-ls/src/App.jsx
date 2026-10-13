@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import {
   AlertCircle, ArrowRight, BadgeDollarSign, Banknote, Bell, BriefcaseBusiness,
   Building2, Check, CheckCircle2, ChevronDown, ChevronUp, ChevronRight, CircleDollarSign,
@@ -440,6 +440,17 @@ function AdminAutoPrime() {
     orcamentos: oficinas.reduce((s,o)=>s+Number(o.total_orcamentos || 0),0),
   }), [oficinas]);
 
+  const statusColors = { pago:'#10b981', teste:'#f59e0b', expirado:'#ef4444', verificar:'#64748b' };
+  const statusNames = { pago:'Pagamento confirmado', teste:'Em teste', expirado:'Inativa / expirada', verificar:'Verificar' };
+  const statusChart = Object.keys(statusNames).map(key => ({
+    name: statusNames[key], value: oficinas.filter(o => getStatus(o).key === key).length, color: statusColors[key]
+  })).filter(x => x.value > 0);
+  const budgetsChart = [...oficinas]
+    .filter(o => Number(o.total_orcamentos || 0) > 0)
+    .sort((a,b) => Number(b.total_orcamentos || 0) - Number(a.total_orcamentos || 0))
+    .slice(0, 7)
+    .map(o => ({ name: (o.workshop_name || 'Sem nome').trim().slice(0,20), orcamentos:Number(o.total_orcamentos || 0) }));
+
   const filtered = oficinas.filter(o => {
     const query = search.trim().toLocaleLowerCase('pt-BR');
     const found = !query || [o.workshop_name, o.email, o.phone, o.tenant_id].some(v => String(v || '').toLocaleLowerCase('pt-BR').includes(query));
@@ -460,6 +471,34 @@ function AdminAutoPrime() {
       <Metric icon={AlertCircle} label="Em teste sem orçamento" value={totais.semUsoEmTeste}/>
       <Metric icon={FileText} label="Sem orçamento (total)" value={totais.naoUsaram}/>
       <Metric icon={Receipt} label="Orçamentos criados" value={totais.orcamentos}/>
+    </div>
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 sm:gap-5">
+      <div className="card p-4 sm:p-6">
+        <h3 className="text-base font-medium text-slate-900">Situação das oficinas</h3>
+        <p className="text-xs text-slate-500 mt-1">Distribuição dos cadastros por situação</p>
+        {statusChart.length === 0 ? <p className="py-12 text-center text-sm text-slate-400">Sem dados para exibir.</p> : <>
+          <div className="h-56 sm:h-64"><ResponsiveContainer width="100%" height="100%">
+            <PieChart><Pie data={statusChart} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius="52%" outerRadius="77%" paddingAngle={3}>
+              {statusChart.map(d => <Cell key={d.name} fill={d.color}/>)}
+            </Pie><RechartsTooltip formatter={(value, name) => [value, name]}/></PieChart>
+          </ResponsiveContainer></div>
+          <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs text-slate-600">{statusChart.map(d => <span key={d.name} className="inline-flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full" style={{backgroundColor:d.color}}/>{d.name}: {d.value}</span>)}</div>
+        </>}
+      </div>
+      <div className="card p-4 sm:p-6">
+        <h3 className="text-base font-medium text-slate-900">Orçamentos por oficina</h3>
+        <p className="text-xs text-slate-500 mt-1">Até 7 oficinas com maior volume de orçamentos</p>
+        {budgetsChart.length === 0 ? <p className="py-12 text-center text-sm text-slate-400">Nenhum orçamento registrado.</p> :
+          <div className="h-64 sm:h-72 mt-3"><ResponsiveContainer width="100%" height="100%">
+            <BarChart data={budgetsChart} layout="vertical" margin={{ top: 5, right: 20, left: 8, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0"/>
+              <XAxis type="number" allowDecimals={false} tick={{fontSize:11}}/>
+              <YAxis type="category" dataKey="name" width={115} tick={{fontSize:10}}/>
+              <RechartsTooltip formatter={v => [v, 'Orçamentos']}/>
+              <Bar dataKey="orcamentos" fill="#2563eb" radius={[0,6,6,0]} maxBarSize={25}/>
+            </BarChart>
+          </ResponsiveContainer></div>}
+      </div>
     </div>
     <div className="card p-4 sm:p-6 space-y-3">
       <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
