@@ -1322,7 +1322,16 @@ function AdminOneTimeSales() {
   const [loading,setLoading] = useState(false);
   const [error,setError] = useState('');
   const [filter,setFilter] = useState('all');
-  const change = (key,value) => setForm(prev=>({...prev,[key]:value}));
+  const change = (key,value) => setForm(prev => {
+    if (key === 'paidAt') {
+      // Ao informar a data, preencher automaticamente o valor integral somente se
+      // ainda não houver valor recebido. O usuário pode ajustar para pagamento parcial.
+      const total = parseSaleAmount(prev.amount);
+      const recebido = parseSaleAmount(prev.paidAmount);
+      return {...prev, paidAt:value, paidAmount:value && recebido === 0 && total > 0 ? String(total) : prev.paidAmount};
+    }
+    return {...prev,[key]:value};
+  });
   const editing = Boolean(editingId);
   const reset = () => {setForm(emptySale());setEditingId(null);setError('');};
   const totalRevenue = oneTimeSales.reduce((a,s)=>a+Number(s.amount||0),0);
@@ -1351,8 +1360,13 @@ function AdminOneTimeSales() {
       const url=editing?`/rest/v1/one_time_sales?id=eq.${encodeURIComponent(editingId)}`:'/rest/v1/one_time_sales';
       const result=await fetchSupabase(url,{method:editing?'PATCH':'POST',body:JSON.stringify(record)});
       if (result.error) throw new Error(result.error.message||'Não foi possível salvar a venda.');
-      if (editing) setOneTimeSales(old=>old.map(s=>s.id===editingId?{...s,...item}:s));
-      else setOneTimeSales(old=>[record,...old]);
+      // PATCH pode retornar sucesso sem alterar registros (por exemplo, por restrição de acesso).
+      if (!Array.isArray(result.data) || result.data.length !== 1) {
+        throw new Error('O Supabase não confirmou a gravação da venda. Verifique as permissões de edição (RLS) da tabela one_time_sales.');
+      }
+      const saved = result.data[0];
+      if (editing) setOneTimeSales(old=>old.map(s=>s.id===editingId?saved:s));
+      else setOneTimeSales(old=>[saved,...old]);
       reset();
     } catch(err){setError(err.message||'Erro ao salvar.');}
     finally {setLoading(false);}
