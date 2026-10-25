@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,  } from 'recharts';
 import {
   AlertCircle, ArrowRight, BadgeDollarSign, Banknote, Bell, BriefcaseBusiness,
   Building2, Check, CheckCircle2, ChevronDown, ChevronUp, ChevronRight, CircleDollarSign,
@@ -19,6 +19,41 @@ if (!supabaseUrl || !supabaseKey) {
 const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
+
+// Só renderiza gráficos quando o contêiner possui dimensões reais e positivas.
+// Evita o aviso width(-1)/height(-1) do Recharts em layouts responsivos.
+function MeasuredChart({ children }) {
+  const containerRef = useRef(null);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    const measure = () => {
+      const rect = element.getBoundingClientRect();
+      const width = Math.floor(rect.width);
+      const height = Math.floor(rect.height);
+      setDimensions(previous =>
+        previous.width === width && previous.height === height
+          ? previous : { width, height }
+      );
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={containerRef} className="w-full h-full min-w-0 min-h-0">
+      {dimensions.width > 0 && dimensions.height > 0
+        ? React.cloneElement(children, { width: dimensions.width, height: dimensions.height })
+        : null}
+    </div>
+  );
+}
 
 const AppContext = createContext(null);
 
@@ -477,11 +512,11 @@ function AdminAutoPrime() {
         <h3 className="text-base font-medium text-slate-900">Situação das oficinas</h3>
         <p className="text-xs text-slate-500 mt-1">Distribuição dos cadastros por situação</p>
         {statusChart.length === 0 ? <p className="py-12 text-center text-sm text-slate-400">Sem dados para exibir.</p> : <>
-          <div className="h-56 sm:h-64"><ResponsiveContainer width="100%" height="100%">
+          <div className="h-56 sm:h-64"><MeasuredChart>
             <PieChart><Pie data={statusChart} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius="52%" outerRadius="77%" paddingAngle={3}>
               {statusChart.map(d => <Cell key={d.name} fill={d.color}/>)}
             </Pie><RechartsTooltip formatter={(value, name) => [value, name]}/></PieChart>
-          </ResponsiveContainer></div>
+          </MeasuredChart></div>
           <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 text-xs text-slate-600">{statusChart.map(d => <span key={d.name} className="inline-flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full" style={{backgroundColor:d.color}}/>{d.name}: {d.value}</span>)}</div>
         </>}
       </div>
@@ -489,7 +524,7 @@ function AdminAutoPrime() {
         <h3 className="text-base font-medium text-slate-900">Orçamentos por oficina</h3>
         <p className="text-xs text-slate-500 mt-1">Até 7 oficinas com maior volume de orçamentos</p>
         {budgetsChart.length === 0 ? <p className="py-12 text-center text-sm text-slate-400">Nenhum orçamento registrado.</p> :
-          <div className="h-64 sm:h-72 mt-3"><ResponsiveContainer width="100%" height="100%">
+          <div className="h-64 sm:h-72 mt-3"><MeasuredChart>
             <BarChart data={budgetsChart} layout="vertical" margin={{ top: 5, right: 20, left: 8, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0"/>
               <XAxis type="number" allowDecimals={false} tick={{fontSize:11}}/>
@@ -497,7 +532,7 @@ function AdminAutoPrime() {
               <RechartsTooltip formatter={v => [v, 'Orçamentos']}/>
               <Bar dataKey="orcamentos" fill="#2563eb" radius={[0,6,6,0]} maxBarSize={25}/>
             </BarChart>
-          </ResponsiveContainer></div>}
+          </MeasuredChart></div>}
       </div>
     </div>
     <div className="card p-4 sm:p-6 space-y-3">
@@ -605,14 +640,14 @@ function AdminDashboard() {
         {data.length === 0 ? (
           <div className="h-full flex items-center justify-center text-sm text-slate-400">{empty}</div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
+          <MeasuredChart>
             <PieChart>
               <Pie data={data} cx="50%" cy="50%" innerRadius="43%" outerRadius="69%" paddingAngle={3} dataKey="value" nameKey="name">
                 {data.map((entry, index) => <Cell key={`${entry.name}-${index}`} fill={entry.color} />)}
               </Pie>
               <RechartsTooltip formatter={(value, name) => [value, name]} />
             </PieChart>
-          </ResponsiveContainer>
+          </MeasuredChart>
         )}
       </div>
     </div>
