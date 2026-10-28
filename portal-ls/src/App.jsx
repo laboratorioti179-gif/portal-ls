@@ -79,6 +79,48 @@ const dateBR = (value) => {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('pt-BR');
 };
 
+// Datas de movimento são locais; datas ISO com horário são convertidas ao fuso do navegador.
+const localDate = (value = new Date()) => {
+  const d = value instanceof Date ? value : new Date(value);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const localMonth = () => localDate().slice(0, 7);
+const isInPeriod = (value, period = null) => {
+  if (!value) return false;
+  if (!period) return true;
+  const str = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str.slice(0, 7) === period;
+  const d = new Date(value);
+  return Number.isFinite(d.getTime()) && localDate(d).slice(0, 7) === period;
+};
+
+// As receitas NÃO são alteradas por saídas; o saldo mostrado é o valor bruto menos as saídas.
+// Reutiliza as mesmas fontes financeiras já usadas no painel: parcelas, desenvolvimentos e vendas avulsas.
+const calculateGrossReceived = ({ financials = [], projects = [], companies = [], oneTimeSales = [] }, period = null) => {
+  const paidInPeriod = date => !period || isInPeriod(date, period);
+  const installments = financials
+    .filter(f => f.status === 'paid' && paidInPeriod(f.paidAt))
+    .reduce((sum, f) => sum + Number(f.amount || 0), 0);
+  const projectPayments = projects.filter(p =>
+    Number(p.developmentPaidAmount || 0) > 0 && paidInPeriod(p.developmentPaidDate)
+  );
+  const projectsWithPayment = new Set(projectPayments.map(p => p.companyId).filter(Boolean));
+  const developmentProjects = projectPayments.reduce((sum, p) => sum + Number(p.developmentPaidAmount || 0), 0);
+  const developmentCompanies = companies
+    .filter(c => !projectsWithPayment.has(c.id) && Number(c.developmentPaidAmount || 0) > 0 && paidInPeriod(c.developmentPaidDate))
+    .reduce((sum, c) => sum + Number(c.developmentPaidAmount || 0), 0);
+  const sales = oneTimeSales
+    .filter(s => Number(s.paidAmount || 0) > 0 && paidInPeriod(s.paidAt))
+    .reduce((sum, s) => sum + Number(s.paidAmount || 0), 0);
+  return installments + developmentProjects + developmentCompanies + sales;
+};
+const summarizeCashOutflows = (outflows = [], period = null) => {
+  const current = outflows.filter(item => isInPeriod(item.occurred_on, period));
+  const expenses = current.filter(x => x.kind === 'gasto').reduce((sum, x) => sum + Number(x.amount || 0), 0);
+  const investments = current.filter(x => x.kind === 'investimento').reduce((sum, x) => sum + Number(x.amount || 0), 0);
+  return { expenses, investments, total: expenses + investments };
+};
+
 const fetchSupabase = async (path, options = {}) => {
   try {
     const { data: { session } } = await supabase.auth.getSession();
@@ -191,13 +233,16 @@ export default function App() {
   const [financialSettings, setFinancialSettings] = useState(null);
   const [approvals, setApprovals] = useState([]);
   const [oneTimeSales, setOneTimeSales] = useState([]);
+  const [cashOutflows, setCashOutflows] = useState([]);
+  const [cashOutflowsError, setCashOutflowsError] = useState('');
 
   const clearData = () => {
     setCompanies([]); setUsers([]); setProjects([]); setTickets([]);
     setHistory([]); setFinancials([]); setFinancialSettings(null); setApprovals([]); setOneTimeSales([]);
+    setCashOutflows([]); setCashOutflowsError('');
   };
 
-  const loadData = async () => {
+  const loadData = async (role = currentUser?.role) => {
     const endpoints = [
       ['companies', setCompanies], ['profiles', setUsers], ['projects', setProjects],
       ['tickets', setTickets], ['history', setHistory], ['financials', setFinancials],
@@ -214,7 +259,23 @@ export default function App() {
     if (!settingsRes.error) setFinancialSettings(settingsRes.data?.[0] || null);
     else console.error('Erro ao carregar configurações financeiras:', settingsRes.error);
 
-    return results.every(r => !r.error) && !settingsRes.error;
+    // Lançamentos internos: disponíveis exclusivamente aos administradores.
+    let cashResult = { error: null };
+    if (role === 'admin') {
+      cashResult = await fetchSupabase('/rest/v1/ls_cash_outflows?select=*&order=occurred_on.desc,created_at.desc');
+      if (cashResult.error) {
+        setCashOutflowsError(cashResult.error.message || 'Falha ao carregar gastos e investimentos. Execute a migração SQL e confira as permissões.');
+        setCashOutflows([]);
+      } else {
+        setCashOutflows(cashResult.data || []);
+        setCashOutflowsError('');
+      }
+    } else {
+      setCashOutflows([]);
+      setCashOutflowsError('');
+    }
+
+    return results.every(r => !r.error) && !settingsRes.error && !cashResult.error;
   };
 
   const loadProfile = async (authUser) => {
@@ -236,7 +297,7 @@ export default function App() {
       if (!mounted) return;
       if (session?.user) {
         const profile = await loadProfile(session.user);
-        if (profile) await loadData();
+        if (profile) await loadData(profile.role);
       }
       setAuthLoading(false);
     };
@@ -254,7 +315,7 @@ export default function App() {
       }
       if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
         const profile = await loadProfile(session.user);
-        if (profile) await loadData();
+        if (profile) await loadData(profile.role);
       }
     });
     return () => { mounted = false; subscription.unsubscribe(); };
@@ -265,7 +326,7 @@ export default function App() {
     if (error || !data?.user) return false;
     const profile = await loadProfile(data.user);
     if (!profile) { await supabase.auth.signOut(); return false; }
-    await loadData();
+    await loadData(profile.role);
     return true;
   };
 
@@ -285,7 +346,8 @@ export default function App() {
   const ctx = {
     currentUser, companies, setCompanies, users, setUsers, projects, setProjects,
     tickets, setTickets, history, setHistory, financials, setFinancials,
-    financialSettings, setFinancialSettings, approvals, setApprovals, oneTimeSales, setOneTimeSales, fetchSupabase, createManagedUser, generateId,
+    financialSettings, setFinancialSettings, approvals, setApprovals, oneTimeSales, setOneTimeSales,
+    cashOutflows, setCashOutflows, cashOutflowsError, fetchSupabase, createManagedUser, generateId,
     refreshData: loadData, logout, supabase,
   };
 
@@ -423,6 +485,7 @@ function AdminPortal() {
   const menu = [
     {id:'dashboard',label:'Visão geral',icon:LayoutDashboard}, {id:'clients',label:'Clientes',icon:Users},
     {id:'projects',label:'Desenvolvimentos',icon:FolderKanban}, {id:'autoprime',label:'AutoPrime',icon:Gauge}, {id:'sales',label:'Vendas avulsas',icon:BadgeDollarSign}, {id:'financial',label:'Financeiro',icon:WalletCards},
+    {id:'cash-outflows',label:'Gastos e investimentos',icon:Receipt},
     {id:'financial-settings',label:'Config. financeiro',icon:Settings},
     {id:'register-company',label:'Cadastrar cliente',icon:Building2},
     {id:'register-admin',label:'Cadastrar admin',icon:ShieldCheck},
@@ -430,6 +493,7 @@ function AdminPortal() {
   const titles = Object.fromEntries(menu.map(x=>[x.id,x.label]));
   const content = {
     dashboard:<AdminDashboard/>, clients:<AdminClients/>, projects:<AdminProjects/>, autoprime:<AdminAutoPrime/>, sales:<AdminOneTimeSales/>, financial:<AdminFinancial/>,
+    'cash-outflows':<AdminCashOutflows/>,
     'financial-settings':<AdminFinancialSettings/>, 'register-company':<AdminRegisterCompany onDone={()=>setView('clients')}/>,
     'register-admin':<AdminRegisterAdmin/>,
   }[view];
@@ -569,46 +633,17 @@ function AdminAutoPrime() {
 }
 
 function AdminDashboard() {
-  const { companies, projects, financials, oneTimeSales } = useContext(AppContext);
+  const { companies, projects, financials, oneTimeSales, cashOutflows, cashOutflowsError } = useContext(AppContext);
   const pending = financials.filter(f => f.status === 'pending');
   const inReview = financials.filter(f => f.status === 'in_review');
   const openFinancials = financials.filter(f => f.status === 'pending' || f.status === 'in_review');
   const overdue = pending.filter(f => f.dueDate && new Date(`${f.dueDate}T23:59:59`) < new Date());
-  const now = new Date();
-  const installmentsReceivedMonth = financials
-    .filter(f => f.status === 'paid' && f.paidAt && new Date(f.paidAt).getMonth() === now.getMonth() && new Date(f.paidAt).getFullYear() === now.getFullYear())
-    .reduce((s, f) => s + Number(f.amount || 0), 0);
-
-  const projectDevelopmentPaymentsThisMonth = projects
-    .filter(p => {
-      if (!p.developmentPaidDate || Number(p.developmentPaidAmount || 0) <= 0) return false;
-      const paidDate = new Date(`${String(p.developmentPaidDate).slice(0,10)}T12:00:00`);
-      return paidDate.getMonth() === now.getMonth() && paidDate.getFullYear() === now.getFullYear();
-    });
-
-  const projectsWithPayment = new Set(
-    projectDevelopmentPaymentsThisMonth.map(p => p.companyId).filter(Boolean)
-  );
-
-  const developmentsReceivedFromProjects = projectDevelopmentPaymentsThisMonth
-    .reduce((sum, p) => sum + Number(p.developmentPaidAmount || 0), 0);
-
-  const developmentsReceivedFromCompanies = companies
-    .filter(c => {
-      if (projectsWithPayment.has(c.id)) return false;
-      if (!c.developmentPaidDate || Number(c.developmentPaidAmount || 0) <= 0) return false;
-      const paidDate = new Date(`${String(c.developmentPaidDate).slice(0,10)}T12:00:00`);
-      return paidDate.getMonth() === now.getMonth() && paidDate.getFullYear() === now.getFullYear();
-    })
-    .reduce((sum, c) => sum + Number(c.developmentPaidAmount || 0), 0);
-
-  const developmentsReceivedMonth = developmentsReceivedFromProjects + developmentsReceivedFromCompanies;
   const avulsoReceivedMonth = oneTimeSales
-    .filter(s => s.paidAt && Number(s.paidAmount || 0) > 0 &&
-      new Date(s.paidAt).getMonth() === now.getMonth() &&
-      new Date(s.paidAt).getFullYear() === now.getFullYear())
-    .reduce((total, s) => total + Number(s.paidAmount || 0), 0);
-  const receivedMonth = installmentsReceivedMonth + developmentsReceivedMonth + avulsoReceivedMonth;
+    .filter(s => Number(s.paidAmount || 0) > 0 && isInPeriod(s.paidAt, localMonth()))
+    .reduce((total, sale) => total + Number(sale.paidAmount || 0), 0);
+  const receivedMonth = calculateGrossReceived({ financials, projects, companies, oneTimeSales }, localMonth());
+  const monthOutflows = summarizeCashOutflows(cashOutflows, localMonth());
+  const netReceivedMonth = receivedMonth - monthOutflows.total;
   const salesReceivable = oneTimeSales.reduce((total, sale) =>
     total + Math.max(0, Number(sale.amount || 0) - Number(sale.paidAmount || 0)), 0);
   const toReceive = openFinancials.reduce((s, f) => s + Number(f.amount || 0), 0) + salesReceivable;
@@ -664,12 +699,18 @@ function AdminDashboard() {
       <Metric icon={FolderKanban} label="Projetos ativos" value={activeProjects.length}/>
       <Metric icon={Clock3} label="Aguardando cliente" value={waitingClient}/>
       <Metric icon={CircleDollarSign} label="A receber" value={money(toReceive)}/>
-       <Metric icon={Banknote} label="Recebido no mês" value={money(receivedMonth)}/>
+       <Metric icon={Banknote} label="Recebido bruto no mês" value={money(receivedMonth)}/>
+       <Metric icon={Receipt} label="Gastos do mês" value={cashOutflowsError ? '—' : money(monthOutflows.expenses)}/>
+       <Metric icon={WalletCards} label="Investimentos do mês" value={cashOutflowsError ? '—' : money(monthOutflows.investments)}/>
+       <Metric icon={CircleDollarSign} label="Saldo líquido do mês" value={cashOutflowsError ? '—' : money(netReceivedMonth)}/>
        <Metric icon={BadgeDollarSign} label="Vendas avulsas recebidas" value={money(avulsoReceivedMonth)}/>
       <Metric icon={AlertCircle} label="Vencidos" value={overdue.length}/>
       <Metric icon={Receipt} label="Em análise" value={inReview.length}/>
       <Metric icon={Gauge} label="Progresso médio" value={`${averageProgress}%`}/>
     </div>
+
+    {cashOutflowsError && <Notice type="error">Não foi possível calcular o saldo líquido: {cashOutflowsError}</Notice>}
+    <p className="text-[11px] text-slate-500">Saldo líquido do mês = valores recebidos no mês − gastos − investimentos lançados no mês. Não representa o saldo bancário inicial.</p>
 
     <div className="dashboard-charts grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-5">
       <ChartCard title="Empresas atendidas" total={companies.length} data={companiesData} empty="Nenhum cliente cadastrado." />
@@ -1456,7 +1497,8 @@ function AdminFinancial() {
     setCompanies,
     fetchSupabase,
     generateId,
-    financialSettings
+    financialSettings,
+    projects, oneTimeSales, cashOutflows, cashOutflowsError
   } = useContext(AppContext);
 
   const [form, setForm] = useState({
@@ -1776,6 +1818,9 @@ function AdminFinancial() {
     .reduce((sum, f) => sum + Number(f.amount || 0), 0);
 
   const overdueCount = financials.filter(isOverdue).length;
+  const grossReceivedTotal = calculateGrossReceived({ financials, projects, companies, oneTimeSales });
+  const cashOutflowsTotal = summarizeCashOutflows(cashOutflows);
+  const netReceivedTotal = grossReceivedTotal - cashOutflowsTotal.total;
 
   const beginGroupEdit = group => {
     setEditingCompanyId(group.company.id);
@@ -2014,9 +2059,15 @@ function AdminFinancial() {
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
         <Metric icon={WalletCards} label="A receber" value={money(pendingTotal)} />
         <Metric icon={CheckCircle2} label="Recebido em parcelas" value={money(paidTotal)} />
+        <Metric icon={Banknote} label="Recebimentos brutos (total)" value={money(grossReceivedTotal)} />
+        <Metric icon={Receipt} label="Gastos (total)" value={cashOutflowsError ? '—' : money(cashOutflowsTotal.expenses)} />
+        <Metric icon={WalletCards} label="Investimentos (total)" value={cashOutflowsError ? '—' : money(cashOutflowsTotal.investments)} />
+        <Metric icon={CircleDollarSign} label="Saldo líquido calculado" value={cashOutflowsError ? '—' : money(netReceivedTotal)} />
         <Metric icon={AlertCircle} label="Vencidas" value={overdueCount} />
         <Metric icon={Users} label="Clientes" value={groups.length} />
       </div>
+      {cashOutflowsError && <Notice type="error">Gastos e investimentos indisponíveis: {cashOutflowsError}</Notice>}
+      <p className="text-[11px] text-slate-500">O saldo líquido soma parcelas pagas, desenvolvimentos e vendas avulsas recebidas e desconta gastos e investimentos registrados. Os valores brutos das cobranças são preservados.</p>
 
       <form
         onSubmit={create}
@@ -2577,6 +2628,176 @@ function AdminFinancial() {
       </div>
     </div>
   );
+}
+
+
+const CASH_OUTFLOW_CATEGORIES = [
+  'Marketing e anúncios', 'Software e assinaturas', 'Servidores e infraestrutura',
+  'Equipamentos', 'Materiais e insumos', 'Serviços terceirizados',
+  'Impostos e taxas', 'Operação e escritório', 'Outros'
+];
+const emptyCashOutflow = () => ({
+  kind: 'gasto', category: 'Marketing e anúncios', description: '', amount: '',
+  occurred_on: localDate(), notes: ''
+});
+// Aceita R$ 1.234,56, 1234,56, 1234.56 ou 1000, sem tratar separador de milhar como centavo.
+const parseCashAmount = value => {
+  const input = String(value ?? '').trim().replace(/^R\$\s*/, '').replace(/\s/g, '');
+  if (/^\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?$/.test(input))
+    return Number(input.replace(/\./g, '').replace(',', '.'));
+  if (/^\d+(?:[,.]\d{1,2})?$/.test(input)) return Number(input.replace(',', '.'));
+  return NaN;
+};
+
+function AdminCashOutflows() {
+  const { cashOutflows, setCashOutflows, cashOutflowsError, companies, financials, projects, oneTimeSales, fetchSupabase } = useContext(AppContext);
+  const [form, setForm] = useState(emptyCashOutflow);
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [month, setMonth] = useState(localMonth());
+  const [showAllMonths, setShowAllMonths] = useState(false);
+  const [kindFilter, setKindFilter] = useState('all');
+
+  const period = showAllMonths ? null : month;
+  const gross = calculateGrossReceived({ financials, projects, companies, oneTimeSales }, period);
+  const movements = summarizeCashOutflows(cashOutflows, period);
+  const lifetimeGross = calculateGrossReceived({ financials, projects, companies, oneTimeSales });
+  const lifetimeOutflows = summarizeCashOutflows(cashOutflows);
+  const filtered = cashOutflows
+    .filter(x => isInPeriod(x.occurred_on, period) && (kindFilter === 'all' || x.kind === kindFilter))
+    .sort((a, b) => String(b.occurred_on).localeCompare(String(a.occurred_on)) || String(b.created_at).localeCompare(String(a.created_at)));
+
+  const reset = () => { setForm(emptyCashOutflow()); setEditingId(null); setError(''); };
+  const edit = item => {
+    setForm({ kind:item.kind, category:item.category || 'Outros', description:item.description || '',
+      amount:String(item.amount ?? ''), occurred_on:item.occurred_on || localDate(), notes:item.notes || '' });
+    setEditingId(item.id);
+    setError(''); setSuccess('');
+    window.scrollTo({ top:0, behavior:'smooth' });
+  };
+  const save = async e => {
+    e.preventDefault(); setError(''); setSuccess('');
+    if (cashOutflowsError) return setError('O banco de dados de gastos e investimentos não está disponível. Configure-o antes de lançar valores.');
+    const parsedAmount = parseCashAmount(form.amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0)
+      return setError('Digite um valor positivo com até duas casas decimais.');
+    const amount = Math.round(parsedAmount * 100) / 100;
+    if (!form.description.trim()) return setError('Descreva o gasto ou investimento.');
+    if (!form.occurred_on) return setError('Informe a data do lançamento.');
+    const record = { kind:form.kind, category:form.category, description:form.description.trim(),
+      amount, occurred_on:form.occurred_on, notes:form.notes.trim() || null };
+    setSaving(true);
+    try {
+      const result = await fetchSupabase(
+        editingId ? `/rest/v1/ls_cash_outflows?id=eq.${encodeURIComponent(editingId)}` : '/rest/v1/ls_cash_outflows',
+        { method: editingId ? 'PATCH' : 'POST', body: JSON.stringify(record) }
+      );
+      if (result.error) throw new Error(result.error.message || 'Erro ao registrar saída.');
+      if (!Array.isArray(result.data) || result.data.length !== 1) throw new Error('O Supabase não confirmou o lançamento. Confira as permissões RLS.');
+      const saved = result.data[0];
+      if (editingId) setCashOutflows(old => old.map(x => x.id === editingId ? saved : x));
+      else setCashOutflows(old => [saved, ...old]);
+      const wasEditing = Boolean(editingId);
+      reset(); setSuccess(wasEditing ? 'Lançamento atualizado e saldo recalculado.' : 'Lançamento salvo e descontado do saldo.');
+    } catch (err) { setError(err.message || 'Não foi possível salvar.'); }
+    finally { setSaving(false); }
+  };
+  const remove = async item => {
+    if (!window.confirm(`Excluir o ${item.kind} "${item.description}" de ${money(item.amount)}? O saldo será recalculado.`)) return;
+    setError(''); setSuccess('');
+    const result = await fetchSupabase(`/rest/v1/ls_cash_outflows?id=eq.${encodeURIComponent(item.id)}`, { method:'DELETE' });
+    if (result.error) return setError(result.error.message || 'Erro ao excluir o lançamento.');
+    if (!Array.isArray(result.data) || result.data.length !== 1)
+      return setError('O Supabase não confirmou a exclusão. Confira as permissões RLS.');
+    setCashOutflows(old => old.filter(x => x.id !== item.id));
+    if (editingId === item.id) reset();
+    setSuccess('Lançamento excluído e saldo recalculado.');
+  };
+
+  return <div className="space-y-5">
+    <div>
+      <h2 className="page-title">Gastos e investimentos</h2>
+      <p className="page-subtitle">Registre saídas de dinheiro. Cada lançamento reduz automaticamente o saldo líquido do Portal LS.</p>
+    </div>
+    {cashOutflowsError && <Notice type="error">Não foi possível carregar lançamentos: {cashOutflowsError}. Execute o arquivo SQL enviado no Supabase antes de usar esta tela.</Notice>}
+    <div className="card p-4 flex flex-col sm:flex-row sm:items-end gap-3">
+      <Field label="Período">
+        <input className="input" type="month" value={month} onChange={e => { setMonth(e.target.value || localMonth()); setShowAllMonths(false); }} disabled={showAllMonths}/>
+      </Field>
+      <label className="inline-flex items-center gap-2 text-sm text-slate-700 pb-2">
+        <input type="checkbox" checked={showAllMonths} onChange={e => setShowAllMonths(e.target.checked)} /> Ver todos os meses
+      </label>
+    </div>
+    <div className="grid grid-cols-2 xl:grid-cols-5 gap-2 sm:gap-4">
+      <Metric icon={Banknote} label="Recebido bruto" value={money(gross)}/>
+      <Metric icon={Receipt} label="Gastos" value={cashOutflowsError ? '—' : money(movements.expenses)}/>
+      <Metric icon={WalletCards} label="Investimentos" value={cashOutflowsError ? '—' : money(movements.investments)}/>
+      <Metric icon={CircleDollarSign} label="Saldo após descontos" value={cashOutflowsError ? '—' : money(gross - movements.total)}/>
+      <Metric icon={History} label="Saldo acumulado*" value={cashOutflowsError ? '—' : money(lifetimeGross - lifetimeOutflows.total)}/>
+    </div>
+    <p className="text-[11px] text-slate-500">* Saldo calculado com os lançamentos existentes no portal, sem saldo bancário inicial. Custos informados em vendas avulsas não são debitados novamente aqui; para descontá-los, cadastre-os como gastos apenas uma vez.</p>
+
+    <form onSubmit={save} className="card p-4 sm:p-6 space-y-4">
+      <div className="flex flex-wrap justify-between items-center gap-2">
+        <h3 className="text-lg">{editingId ? 'Editar lançamento' : 'Novo gasto ou investimento'}</h3>
+        {editingId && <button type="button" className="mini-btn" onClick={reset}>Cancelar edição</button>}
+      </div>
+      {error && <Notice type="error">{error}</Notice>}
+      {success && <Notice type="success">{success}</Notice>}
+      <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
+        <Field label="Tipo de saída">
+          <select className="input" value={form.kind} onChange={e => setForm({...form, kind:e.target.value})} required>
+            <option value="gasto">Gasto</option><option value="investimento">Investimento</option>
+          </select>
+        </Field>
+        <Field label="Categoria">
+          <select className="input" value={form.category} onChange={e => setForm({...form, category:e.target.value})} required>
+            {CASH_OUTFLOW_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+          </select>
+        </Field>
+        <Field label="Valor (R$)">
+          <input className="input" inputMode="decimal" placeholder="Ex: 250,00" value={form.amount} onChange={e => setForm({...form, amount:e.target.value})} required/>
+        </Field>
+        <Field label="Descrição">
+          <input className="input" placeholder="Ex: Créditos Google Ads" value={form.description} onChange={e => setForm({...form, description:e.target.value})} maxLength={200} required/>
+        </Field>
+        <Field label="Data do pagamento / saída">
+          <input className="input" type="date" value={form.occurred_on} onChange={e => setForm({...form, occurred_on:e.target.value})} required/>
+        </Field>
+        <Field label="Observações (opcional)">
+          <input className="input" placeholder="Ex: Campanha AutoPrime" value={form.notes} onChange={e => setForm({...form, notes:e.target.value})}/>
+        </Field>
+      </div>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <span className="text-xs text-slate-500">O desconto será aplicado no mês da data informada.</span>
+        <button className="btn-primary" disabled={saving || Boolean(cashOutflowsError)}>{saving ? 'Salvando...' : editingId ? 'Salvar alterações' : 'Registrar saída'}</button>
+      </div>
+    </form>
+
+    <div className="card p-4 sm:p-6 space-y-4">
+      <div className="flex flex-wrap justify-between items-center gap-3">
+        <h3 className="text-lg">Histórico de saídas</h3>
+        <select className="input w-auto" value={kindFilter} onChange={e => setKindFilter(e.target.value)} aria-label="Filtrar tipo">
+          <option value="all">Todos</option><option value="gasto">Somente gastos</option><option value="investimento">Somente investimentos</option>
+        </select>
+      </div>
+      {!filtered.length ? <p className="text-sm text-slate-500">Nenhum lançamento encontrado neste período.</p> :
+        <div className="space-y-2">{filtered.map(item => <div key={item.id} className="p-3 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:justify-between gap-3">
+          <div className="min-w-0">
+            <div className="font-medium text-slate-900 break-words">{item.description}</div>
+            <div className="text-xs text-slate-500 mt-1">{item.kind === 'investimento' ? 'Investimento' : 'Gasto'} • {item.category} • {dateBR(item.occurred_on)}</div>
+            {item.notes && <div className="text-xs text-slate-500 mt-1 break-words">{item.notes}</div>}
+          </div>
+          <div className="flex flex-wrap gap-2 items-center shrink-0">
+            <span className="text-rose-700 font-medium">− {money(item.amount)}</span>
+            <button className="mini-btn" type="button" onClick={() => edit(item)}>Editar</button>
+            <button className="mini-btn mini-btn-danger" type="button" onClick={() => remove(item)}>Excluir</button>
+          </div>
+        </div>)}</div>}
+    </div>
+  </div>;
 }
 
 function AdminFinancialSettings(){
