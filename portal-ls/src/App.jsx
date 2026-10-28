@@ -332,12 +332,38 @@ export default function App() {
 
   const logout = async () => { await supabase.auth.signOut(); setCurrentUser(null); clearData(); };
 
+  // Cadastro protegido pelo Supabase. O navegador nunca recebe a chave de serviço.
   const createManagedUser = async ({ name, email, password, role, companyId = null }) => {
+    const { data: authData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError || !authData?.session?.access_token) {
+      throw new Error('Sua sessão expirou. Entre novamente no Portal LS e tente outra vez.');
+    }
+
     const { data, error } = await supabase.functions.invoke('admin-create-user', {
-      body: { name, email, password, role, companyId }
+      body: { name: name.trim(), email: email.trim().toLowerCase(), password, role, companyId }
     });
-    if (error) throw error;
+
+    if (error) {
+      const status = error.context?.status;
+      let serverMessage = '';
+      try {
+        // FunctionsHttpError traz a Response em context; preserve o erro real do servidor.
+        const payload = await error.context?.clone?.().json();
+        serverMessage = String(payload?.error || payload?.message || '').trim();
+      } catch (_) { /* sem JSON no corpo da resposta */ }
+      console.error('admin-create-user:', { type: error.name, status, detail: serverMessage });
+
+      if (error.name === 'FunctionsFetchError') {
+        throw new Error('Não foi possível conectar à função admin-create-user. Confira se ela está publicada no projeto correto do Supabase e se responde ao OPTIONS (CORS). Consulte o Console do navegador e Edge Functions > Logs.');
+      }
+      if (status === 404) throw new Error('A função admin-create-user não foi encontrada neste projeto Supabase. É necessário publicá-la antes de criar administradores.');
+      if (status === 401) throw new Error(serverMessage || 'Sessão inválida ou expirada. Faça login novamente.');
+      if (status === 403) throw new Error(serverMessage || 'Somente um administrador autorizado pode criar outro administrador.');
+      if (status === 409) throw new Error(serverMessage || 'Já existe uma conta cadastrada com este e-mail.');
+      throw new Error(serverMessage || `Não foi possível criar o administrador${status ? ` (HTTP ${status})` : ''}. Verifique os registros da Edge Function.`);
+    }
     if (data?.error) throw new Error(data.error);
+    if (!data?.profile?.id) throw new Error('A função respondeu sem confirmar o cadastro do perfil. Verifique os registros no Supabase antes de tentar novamente.');
     return data;
   };
 
@@ -1363,10 +1389,45 @@ function AdminRegisterCompany({ onDone }) {
   );
 }
 
-function AdminRegisterAdmin(){
-  const {setUsers,createManagedUser}=useContext(AppContext);const [f,setF]=useState({name:'',email:'',password:''});const [loading,setLoading]=useState(false);const [msg,setMsg]=useState('');
-  const submit=async e=>{e.preventDefault();setLoading(true);try{const r=await createManagedUser({...f,email:f.email.toLowerCase(),role:'admin'});if(r.profile)setUsers(x=>[...x,r.profile]);setMsg('Administrador criado.');setF({name:'',email:'',password:''});}catch(err){setMsg(err.message)}finally{setLoading(false)}};
-  return <div className="max-w-2xl card p-8"><h2 className="text-2xl font-normal mb-6">Novo administrador</h2>{msg&&<Notice>{msg}</Notice>}<form onSubmit={submit} className="space-y-4"><Field label="Nome"><input className="input" value={f.name} onChange={e=>setF({...f,name:e.target.value})} required/></Field><Field label="E-mail"><input className="input" type="email" value={f.email} onChange={e=>setF({...f,email:e.target.value})} required/></Field><Field label="Senha temporária"><input className="input" type="password" minLength={8} value={f.password} onChange={e=>setF({...f,password:e.target.value})} required/></Field><button className="btn-primary" disabled={loading}>{loading?'Criando...':'Criar administrador'}</button></form></div>;
+function AdminRegisterAdmin() {
+  const { setUsers, createManagedUser } = useContext(AppContext);
+  const [f, setF] = useState({ name: '', email: '', password: '' });
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState({ text: '', type: 'info' });
+  const change = (key, value) => setF(previous => ({ ...previous, [key]: value }));
+
+  const submit = async event => {
+    event.preventDefault();
+    if (loading) return;
+    setLoading(true);
+    setMessage({ text: '', type: 'info' });
+    try {
+      const result = await createManagedUser({ ...f, role: 'admin' });
+      if (result.profile) {
+        setUsers(previous => previous.some(u => u.id === result.profile.id)
+          ? previous.map(u => u.id === result.profile.id ? result.profile : u)
+          : [...previous, result.profile]);
+      }
+      setMessage({ text: 'Administrador criado com sucesso. O novo usuário já pode acessar o Portal LS com as credenciais cadastradas.', type: 'success' });
+      setF({ name: '', email: '', password: '' });
+    } catch (error) {
+      setMessage({ text: error.message || 'Não foi possível criar o administrador.', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return <div className="max-w-2xl card p-8">
+    <h2 className="text-2xl font-normal mb-2">Novo administrador</h2>
+    <p className="text-sm text-slate-500 mb-6">O novo administrador terá acesso às áreas administrativas e financeiras do portal.</p>
+    {message.text && <Notice type={message.type}>{message.text}</Notice>}
+    <form onSubmit={submit} className="space-y-4">
+      <Field label="Nome"><input className="input" value={f.name} onChange={e => change('name', e.target.value)} required /></Field>
+      <Field label="E-mail"><input className="input" type="email" value={f.email} onChange={e => change('email', e.target.value)} required /></Field>
+      <Field label="Senha temporária"><input className="input" type="password" minLength={8} value={f.password} onChange={e => change('password', e.target.value)} autoComplete="new-password" required /></Field>
+      <button className="btn-primary" disabled={loading}>{loading ? 'Criando...' : 'Criar administrador'}</button>
+    </form>
+  </div>;
 }
 
 function AdminProjects() {
