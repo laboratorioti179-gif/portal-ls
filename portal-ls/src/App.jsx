@@ -6,7 +6,7 @@ import {
   Building2, Check, CheckCircle2, ChevronDown, ChevronUp, ChevronRight, CircleDollarSign,
   Clock3, CreditCard, FileText, FolderKanban, Gauge, History, LayoutDashboard,
   LogOut, Menu, MessageSquareText, Plus, Receipt, RefreshCw, Search, Settings,
-  ShieldCheck, Sparkles, Ticket, UserPlus, Users, WalletCards, X
+  ShieldCheck, Sparkles, Ticket, UserPlus, Users, WalletCards, X, Camera, UploadCloud, Trash2, Pencil, Save
 } from 'lucide-react';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -510,7 +510,7 @@ function AdminPortal() {
   const [view, setView] = useState('dashboard');
   const menu = [
     {id:'dashboard',label:'Visão geral',icon:LayoutDashboard}, {id:'clients',label:'Clientes',icon:Users},
-    {id:'projects',label:'Desenvolvimentos',icon:FolderKanban}, {id:'autoprime',label:'AutoPrime',icon:Gauge}, {id:'sales',label:'Vendas avulsas',icon:BadgeDollarSign}, {id:'financial',label:'Financeiro',icon:WalletCards},
+    {id:'projects',label:'Desenvolvimentos',icon:FolderKanban}, {id:'work-projects',label:'Projetos',icon:BriefcaseBusiness}, {id:'autoprime',label:'AutoPrime',icon:Gauge}, {id:'sales',label:'Vendas avulsas',icon:BadgeDollarSign}, {id:'financial',label:'Financeiro',icon:WalletCards},
     {id:'cash-outflows',label:'Gastos e investimentos',icon:Receipt},
     {id:'financial-settings',label:'Config. financeiro',icon:Settings},
     {id:'register-company',label:'Cadastrar cliente',icon:Building2},
@@ -518,7 +518,7 @@ function AdminPortal() {
   ];
   const titles = Object.fromEntries(menu.map(x=>[x.id,x.label]));
   const content = {
-    dashboard:<AdminDashboard/>, clients:<AdminClients/>, projects:<AdminProjects/>, autoprime:<AdminAutoPrime/>, sales:<AdminOneTimeSales/>, financial:<AdminFinancial/>,
+    dashboard:<AdminDashboard/>, clients:<AdminClients/>, projects:<AdminProjects/>, 'work-projects':<AdminWorkProjects/>, autoprime:<AdminAutoPrime/>, sales:<AdminOneTimeSales/>, financial:<AdminFinancial/>,
     'cash-outflows':<AdminCashOutflows/>,
     'financial-settings':<AdminFinancialSettings/>, 'register-company':<AdminRegisterCompany onDone={()=>setView('clients')}/>,
     'register-admin':<AdminRegisterAdmin/>,
@@ -1429,6 +1429,439 @@ function AdminRegisterAdmin() {
     </form>
   </div>;
 }
+
+// Área interna de gestão de projetos da LS.
+// Independente de `projects` (Desenvolvimentos), utilizado pelo portal do cliente e pelo financeiro.
+const WORK_PROJECT_STATUSES = [
+  ['planning', 'Planejamento'],
+  ['in_progress', 'Em andamento'],
+  ['waiting', 'Aguardando retorno'],
+  ['paused', 'Pausado'],
+  ['completed', 'Concluído'],
+  ['cancelled', 'Cancelado'],
+];
+const WORK_SERVICE_TYPES = [
+  'Desenvolvimento de aplicativo', 'Automação / IA', 'Site / landing page',
+  'Impressão 3D', 'Design', 'Integração de sistemas', 'Consultoria', 'Outro',
+];
+const WORK_STATUS_NAME = Object.fromEntries(WORK_PROJECT_STATUSES);
+const WORK_PHOTO_BUCKET = 'ls-project-photos';
+const WORK_MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+const WORK_PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+const workFormEmpty = (parent = null) => ({
+  name: '', client_name: parent?.client_name || '',
+  service_type: parent?.service_type || 'Desenvolvimento de aplicativo',
+  description: '', next_step: '', start_date: localDate(), due_date: '',
+  budget: '', progress: 0, status: 'planning', parent_id: parent?.id || null,
+});
+const workMoneyValue = value => {
+  const raw = String(value ?? '').replace(/R\$|\s/g, '').trim();
+  if (!raw) return 0;
+  const normalized = raw.includes(',') ? raw.replace(/\./g, '').replace(',', '.') : raw;
+  return Number(normalized);
+};
+const workProgress = (project, records) => {
+  const children = records.filter(p => p.parent_id === project.id && p.status !== 'cancelled');
+  const val = children.length
+    ? children.reduce((total, child) => total + Number(child.progress || 0), 0) / children.length
+    : Number(project.progress || 0);
+  return Math.max(0, Math.min(100, Math.round(val)));
+};
+const workIsOverdue = p => p.status !== 'completed' && p.status !== 'cancelled' &&
+  !!p.due_date && p.due_date < localDate();
+
+function WorkStatus({status}) {
+  const classes = {
+    planning:'bg-slate-100 text-slate-600',
+    in_progress:'bg-blue-50 text-blue-700',
+    waiting:'bg-amber-50 text-amber-700',
+    paused:'bg-orange-50 text-orange-700',
+    completed:'bg-emerald-50 text-emerald-700',
+    cancelled:'bg-rose-50 text-rose-700',
+  };
+  return <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] whitespace-nowrap ${classes[status] || classes.planning}`}>
+    {WORK_STATUS_NAME[status] || 'Planejamento'}
+  </span>;
+}
+
+function AdminWorkProjects() {
+  const { supabase, currentUser, companies } = useContext(AppContext);
+  const [records, setRecords] = useState([]);
+  const [comments, setComments] = useState([]);
+  const [photos, setPhotos] = useState([]);
+  const [imageUrls, setImageUrls] = useState({});
+  const [selectedId, setSelectedId] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState(workFormEmpty());
+  const [commentText, setCommentText] = useState('');
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [commentBusy, setCommentBusy] = useState(false);
+  const [notice, setNotice] = useState(null);
+  const [error, setError] = useState('');
+
+  const loadAll = async () => {
+    const [projectResult, commentResult, photoResult] = await Promise.all([
+      supabase.from('ls_work_projects').select('*').order('created_at', { ascending: false }),
+      supabase.from('ls_work_project_comments').select('*').order('created_at', { ascending: false }),
+      supabase.from('ls_work_project_photos').select('*').order('created_at', { ascending: false }),
+    ]);
+    const failure = projectResult.error || commentResult.error || photoResult.error;
+    if (failure) throw new Error(`${failure.message || 'Não foi possível carregar os projetos.'} Verifique a migração SQL e as permissões de administrador.`);
+    setRecords(projectResult.data || []);
+    setComments(commentResult.data || []);
+    setPhotos(photoResult.data || []);
+  };
+
+  useEffect(() => {
+    let active = true;
+    const start = async () => {
+      setLoading(true);
+      try {
+        // Os dados são exclusivos do administrativo, sem alterar a lista de Desenvolvimentos.
+        await loadAll();
+        if (active) setError('');
+      } catch (err) {
+        if (active) setError(err.message || 'Erro ao carregar projetos.');
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    start();
+    return () => { active = false; };
+  }, []);
+
+  const selected = records.find(p => p.id === selectedId) || null;
+  const parent = selected?.parent_id ? records.find(p => p.id === selected.parent_id) : null;
+  const children = selected && !selected.parent_id
+    ? records.filter(p => p.parent_id === selected.id).sort((a,b) => (a.created_at || '').localeCompare(b.created_at || ''))
+    : [];
+  const mainProjects = records.filter(p => !p.parent_id);
+  const totalActive = mainProjects.filter(p => !['completed', 'cancelled'].includes(p.status)).length;
+  const totalDone = mainProjects.filter(p => p.status === 'completed').length;
+  const totalLate = mainProjects.filter(workIsOverdue).length;
+  const totalBudget = mainProjects.reduce((sum, p) => sum + Number(p.budget || 0), 0);
+  const visibleProjects = mainProjects
+    .filter(p => {
+      const query = search.trim().toLocaleLowerCase('pt-BR');
+      const matches = !query || [p.name, p.client_name, p.service_type, p.description,
+        ...records.filter(child => child.parent_id === p.id).map(child => child.name)]
+        .some(value => String(value || '').toLocaleLowerCase('pt-BR').includes(query));
+      const matchesStatus = filter === 'all' || (filter === 'overdue' ? workIsOverdue(p) : p.status === filter);
+      return matches && matchesStatus;
+    })
+    .sort((a,b) => {
+      const lateDiff = Number(workIsOverdue(b)) - Number(workIsOverdue(a));
+      return lateDiff || String(b.created_at || '').localeCompare(String(a.created_at || ''));
+    });
+
+  const beginCreate = (parentProject = null) => {
+    setForm(workFormEmpty(parentProject));
+    setEditing({ mode:'create', id:null, parentId:parentProject?.id || null });
+    setNotice(null);
+  };
+  const beginEdit = p => {
+    setForm({
+      name:p.name || '', client_name:p.client_name || '', service_type:p.service_type || 'Outro',
+      description:p.description || '', next_step:p.next_step || '',
+      start_date:p.start_date || '', due_date:p.due_date || '',
+      budget:Number(p.budget || 0) ? String(p.budget).replace('.', ',') : '',
+      progress:Number(p.progress || 0), status:p.status || 'planning', parent_id:p.parent_id || null,
+    });
+    setEditing({ mode:'edit', id:p.id, parentId:p.parent_id || null });
+    setNotice(null);
+  };
+  const setField = (field, value) => setForm(previous => ({ ...previous, [field]:value }));
+
+  const saveProject = async event => {
+    event.preventDefault();
+    if (saving) return;
+    const amount = workMoneyValue(form.budget);
+    if (!form.name.trim()) return setNotice({ type:'error', text:'Informe o nome do projeto.' });
+    if (!form.client_name.trim()) return setNotice({ type:'error', text:'Informe o nome do cliente.' });
+    if (!Number.isFinite(amount) || amount < 0) return setNotice({ type:'error', text:'Informe um orçamento válido.' });
+    if (form.start_date && form.due_date && form.due_date < form.start_date)
+      return setNotice({ type:'error', text:'O prazo não pode ser anterior à data de início.' });
+    const payload = {
+      name:form.name.trim(), client_name:form.client_name.trim(),
+      service_type:form.service_type.trim() || 'Outro',
+      description:form.description.trim() || null,
+      next_step:form.next_step.trim() || null,
+      start_date:form.start_date || null, due_date:form.due_date || null,
+      budget:amount, progress:Math.max(0, Math.min(100, Number(form.progress) || 0)),
+      status:form.status,
+    };
+    setSaving(true);
+    try {
+      let result;
+      if (editing.mode === 'edit') {
+        result = await supabase.from('ls_work_projects').update(payload).eq('id', editing.id).select('id').single();
+      } else {
+        result = await supabase.from('ls_work_projects')
+          .insert({ ...payload, parent_id:editing.parentId, created_by:currentUser.id }).select('id').single();
+      }
+      if (result.error) throw result.error;
+      await loadAll();
+      if (editing.mode === 'create' && !editing.parentId) setSelectedId(result.data.id);
+      if (editing.mode === 'create' && editing.parentId) setSelectedId(editing.parentId);
+      setEditing(null);
+      setNotice({ type:'success', text:editing.mode === 'edit' ? 'Projeto atualizado.' : 'Projeto cadastrado com sucesso.' });
+    } catch (err) {
+      setNotice({ type:'error', text:err.message || 'Não foi possível salvar o projeto.' });
+    } finally { setSaving(false); }
+  };
+
+  const removeProject = async p => {
+    const ids = p.parent_id ? [p.id] : [p.id, ...records.filter(child => child.parent_id === p.id).map(child => child.id)];
+    const imagesToRemove = photos.filter(photo => ids.includes(photo.project_id)).map(photo => photo.storage_path);
+    const isMain = !p.parent_id;
+    const question = isMain
+      ? `Excluir permanentemente "${p.name}" e todos os seus subprojetos, fotos e comentários? Esta ação não pode ser desfeita.`
+      : `Excluir permanentemente o subprojeto "${p.name}", incluindo fotos e comentários?`;
+    if (!window.confirm(question)) return;
+    setSaving(true); setNotice(null);
+    try {
+      const { data, error: deleteError } = await supabase.from('ls_work_projects').delete().eq('id', p.id).select('id');
+      if (deleteError) throw deleteError;
+      if (!data?.length) throw new Error('Exclusão não autorizada. Verifique suas permissões.');
+      // Cascata do banco exclui subprojetos, comentários e metadados.
+      // Os arquivos no Storage precisam ser excluídos separadamente.
+      const storageErrors = [];
+      for (let i = 0; i < imagesToRemove.length; i += 100) {
+        const result = await supabase.storage.from(WORK_PHOTO_BUCKET).remove(imagesToRemove.slice(i, i + 100));
+        if (result.error) storageErrors.push(result.error.message);
+      }
+      setEditing(null);
+      setSelectedId(p.parent_id || null);
+      await loadAll();
+      setNotice(storageErrors.length
+        ? { type:'error', text:'Projeto excluído, mas alguns arquivos não puderam ser removidos do armazenamento. Confira o bucket privado.' }
+        : { type:'success', text:'Projeto e informações relacionadas excluídos.' });
+    } catch (err) { setNotice({ type:'error', text:err.message || 'Não foi possível excluir o projeto.' }); }
+    finally { setSaving(false); }
+  };
+
+  const addComment = async event => {
+    event.preventDefault();
+    if (!selected || !commentText.trim() || commentBusy) return;
+    setCommentBusy(true);
+    try {
+      const { error: insertError } = await supabase.from('ls_work_project_comments').insert({
+        project_id:selected.id, body:commentText.trim(), created_by:currentUser.id,
+      });
+      if (insertError) throw insertError;
+      setCommentText('');
+      await loadAll();
+      setNotice({ type:'success', text:'Comentário registrado.' });
+    } catch (err) { setNotice({ type:'error', text:err.message || 'Não foi possível registrar o comentário.' }); }
+    finally { setCommentBusy(false); }
+  };
+  const removeComment = async c => {
+    if (!window.confirm('Excluir este comentário?')) return;
+    setCommentBusy(true);
+    try {
+      const { data, error: deleteError } = await supabase.from('ls_work_project_comments').delete().eq('id', c.id).select('id');
+      if (deleteError) throw deleteError;
+      if (!data?.length) throw new Error('Não foi possível excluir o comentário.');
+      await loadAll();
+      setNotice({ type:'success', text:'Comentário excluído.' });
+    } catch (err) { setNotice({ type:'error', text:err.message || 'Erro ao excluir comentário.' }); }
+    finally { setCommentBusy(false); }
+  };
+
+  const uploadPhotos = async event => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!selected || !files.length || photoBusy) return;
+    if (files.some(file => !WORK_PHOTO_TYPES.has(file.type) || file.size > WORK_MAX_PHOTO_BYTES || file.size === 0)) {
+      return setNotice({ type:'error', text:'Envie apenas JPG, PNG, WebP ou GIF, com até 10 MB por foto.' });
+    }
+    setPhotoBusy(true);
+    let uploaded = 0;
+    try {
+      for (const file of files) {
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-85) || 'foto';
+        const path = `${selected.id}/${crypto.randomUUID()}-${safeName}`;
+        const storage = await supabase.storage.from(WORK_PHOTO_BUCKET).upload(path, file, {
+          contentType:file.type, cacheControl:'3600', upsert:false,
+        });
+        if (storage.error) throw storage.error;
+        const { error: dbError } = await supabase.from('ls_work_project_photos').insert({
+          project_id:selected.id, storage_path:path, file_name:file.name,
+          mime_type:file.type, size_bytes:file.size, uploaded_by:currentUser.id,
+        });
+        if (dbError) {
+          await supabase.storage.from(WORK_PHOTO_BUCKET).remove([path]);
+          throw dbError;
+        }
+        uploaded++;
+      }
+      setNotice({ type:'success', text:`${uploaded} foto(s) anexada(s) com sucesso.` });
+    } catch (err) {
+      setNotice({ type:'error', text:`${uploaded} foto(s) enviada(s). O envio foi interrompido: ${err.message || 'erro desconhecido'}` });
+    } finally {
+      try { await loadAll(); } catch (err) { setNotice({ type:'error', text:err.message }); }
+      setPhotoBusy(false);
+    }
+  };
+  const removePhoto = async photo => {
+    if (!window.confirm(`Excluir a foto "${photo.file_name}"?`)) return;
+    setPhotoBusy(true);
+    try {
+      const { data, error: dbError } = await supabase.from('ls_work_project_photos').delete().eq('id', photo.id).select('id');
+      if (dbError) throw dbError;
+      if (!data?.length) throw new Error('Não foi possível excluir o registro da foto.');
+      const { error: storageError } = await supabase.storage.from(WORK_PHOTO_BUCKET).remove([photo.storage_path]);
+      await loadAll();
+      setNotice(storageError
+        ? { type:'error', text:'Foto desvinculada, mas não foi possível remover o arquivo do armazenamento.' }
+        : { type:'success', text:'Foto excluída.' });
+    } catch (err) { setNotice({ type:'error', text:err.message || 'Não foi possível excluir a foto.' }); }
+    finally { setPhotoBusy(false); }
+  };
+
+  const currentPhotos = selected ? photos.filter(p => p.project_id === selected.id) : [];
+  const currentComments = selected ? comments.filter(c => c.project_id === selected.id) : [];
+  useEffect(() => {
+    let active = true;
+    setImageUrls({});
+    if (!selectedId || !currentPhotos.length) return () => { active = false; };
+    const signImages = async () => {
+      const results = await Promise.all(currentPhotos.map(async photo => {
+        const { data, error: signedError } = await supabase.storage.from(WORK_PHOTO_BUCKET)
+          .createSignedUrl(photo.storage_path, 60 * 30);
+        return [photo.id, signedError ? null : data?.signedUrl || null];
+      }));
+      if (active) setImageUrls(Object.fromEntries(results));
+    };
+    signImages();
+    return () => { active = false; };
+  }, [selectedId, photos]);
+
+  const formView = editing ? (
+    <form onSubmit={saveProject} className="card p-4 sm:p-6 space-y-5">
+      <div className="flex flex-wrap justify-between items-center gap-2">
+        <div><h3 className="text-lg font-medium">{editing.mode === 'edit' ? 'Editar projeto' : editing.parentId ? 'Novo subprojeto' : 'Novo projeto'}</h3>
+          <p className="text-xs text-slate-500 mt-1">Preencha os dados e salve para registrar no Supabase.</p></div>
+        <button type="button" className="mini-btn" onClick={() => { setEditing(null); setNotice(null); }}>Cancelar</button>
+      </div>
+      <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        <Field label="Nome do projeto *"><input className="input" value={form.name} onChange={e=>setField('name',e.target.value)} maxLength={180} placeholder="Ex: Aplicativo de gestão" required /></Field>
+        <Field label="Nome do cliente *"><input className="input" list="work-project-clients" value={form.client_name} onChange={e=>setField('client_name',e.target.value)} maxLength={180} placeholder="Digite ou selecione um cliente" required />
+          <datalist id="work-project-clients">{companies.map(c=><option key={c.id} value={c.name}/>)}</datalist></Field>
+        <Field label="Tipo de serviço"><input className="input" list="work-service-types" value={form.service_type} onChange={e=>setField('service_type',e.target.value)} maxLength={120} placeholder="Selecione ou digite" />
+          <datalist id="work-service-types">{WORK_SERVICE_TYPES.map(t=><option value={t} key={t}/>)}</datalist></Field>
+        <Field label="Data de início"><input className="input" type="date" value={form.start_date} onChange={e=>setField('start_date',e.target.value)} /></Field>
+        <Field label="Prazo de entrega"><input className="input" type="date" value={form.due_date} onChange={e=>setField('due_date',e.target.value)} /></Field>
+        <Field label="Orçamento (R$)"><input className="input" type="text" inputMode="decimal" value={form.budget} onChange={e=>setField('budget',e.target.value)} placeholder="Ex: 1.500,00" /></Field>
+        <Field label="Situação"><select className="input" value={form.status} onChange={e=>setField('status',e.target.value)}>{WORK_PROJECT_STATUSES.map(([v,t])=><option key={v} value={v}>{t}</option>)}</select></Field>
+        <Field label="Progresso (%)"><input className="input" type="number" min="0" max="100" step="1" value={form.progress} onChange={e=>setField('progress',e.target.value)} /></Field>
+        <Field label="Próxima ação"><input className="input" value={form.next_step} onChange={e=>setField('next_step',e.target.value)} placeholder="Ex: Enviar versão de testes" /></Field>
+      </div>
+      {editing.mode === 'edit' && records.some(item => item.parent_id === editing.id) &&
+        <p className="text-xs text-blue-700">Este projeto possui subprojetos. O progresso exibido será a média dos subprojetos; o percentual manual ficará guardado para uso quando não houver subprojetos.</p>}
+      <Field label="Descrição / informações completas"><textarea className="input min-h-28" value={form.description} onChange={e=>setField('description',e.target.value)} placeholder="Escopo, entregáveis, requisitos, materiais, referências, acordos e demais informações..." /></Field>
+      <div className="flex justify-end gap-2"><button className="btn-primary" type="submit" disabled={saving}><Save size={15}/>{saving ? 'Salvando...' : 'Salvar projeto'}</button></div>
+    </form>
+  ) : null;
+
+  return <div className="space-y-5">
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div><h2 className="page-title">Projetos</h2><p className="page-subtitle">Gestão interna da LS · projetos, subprojetos, fotos e anotações em um só lugar.</p></div>
+      {!editing && <button type="button" className="btn-primary self-start" onClick={()=>beginCreate()}><Plus size={16}/> Novo projeto</button>}
+    </div>
+    {error && <Notice type="error">{error}</Notice>}
+    {notice && <Notice type={notice.type}>{notice.text}</Notice>}
+    {editing && formView}
+    {loading ? <div className="card p-10 text-center text-slate-500">Carregando projetos...</div> : !editing && !selected ? <>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
+        <Metric icon={FolderKanban} label="Projetos principais" value={mainProjects.length}/>
+        <Metric icon={Clock3} label="Em aberto" value={totalActive}/>
+        <Metric icon={AlertCircle} label="Atrasados" value={totalLate}/>
+        <Metric icon={CheckCircle2} label="Concluídos" value={totalDone}/>
+      </div>
+      <div className="card p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <p className="text-sm text-slate-600">Orçamentos cadastrados: <strong className="text-slate-950">{money(totalBudget)}</strong><span className="block text-[11px] text-slate-400">Informativo, sem movimentar o financeiro.</span></p>
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          <input className="input sm:w-64" aria-label="Buscar projetos" placeholder="Buscar projeto, cliente, serviço..." value={search} onChange={e=>setSearch(e.target.value)} />
+          <select className="input sm:w-48" aria-label="Filtrar projetos" value={filter} onChange={e=>setFilter(e.target.value)}>
+            <option value="all">Todas as situações</option><option value="overdue">Atrasados</option>
+            {WORK_PROJECT_STATUSES.map(([v,t])=><option value={v} key={v}>{t}</option>)}
+          </select>
+        </div>
+      </div>
+      {visibleProjects.length === 0 ? <Empty title="Nenhum projeto encontrado" text="Clique em Novo projeto para começar ou ajuste sua busca."/> :
+        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
+          {visibleProjects.map(p => {
+            const qty = records.filter(child => child.parent_id === p.id).length;
+            const progress = workProgress(p, records);
+            return <button key={p.id} type="button" onClick={()=>{ setSelectedId(p.id); setCommentText(''); setNotice(null); }}
+              className="card p-5 text-left transition hover:shadow-md hover:border-blue-200 min-w-0">
+              <div className="flex justify-between items-start gap-2"><div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center"><FolderKanban size={20}/></div><WorkStatus status={p.status}/></div>
+              <h3 className="text-base font-medium text-slate-950 mt-4 break-words">{p.name}</h3>
+              <p className="text-xs text-slate-500 mt-1 break-words">{p.client_name} · {p.service_type}</p>
+              <div className="flex items-center justify-between mt-5 mb-2 text-xs"><span>Progresso</span><strong>{progress}%</strong></div><Progress value={progress}/>
+              <div className="flex justify-between gap-2 mt-4 text-xs text-slate-500"><span>{qty} subprojeto(s)</span><span className={workIsOverdue(p)?'text-rose-600 font-medium':''}>{p.due_date?`Entrega: ${dateBR(p.due_date)}`:'Sem prazo'}</span></div>
+              <p className="text-xs text-slate-700 mt-3">Orçamento: {money(p.budget)}</p>
+            </button>;
+          })}
+        </div>}
+    </> : !editing && selected ? <>
+      <button type="button" className="mini-btn" onClick={()=>{setSelectedId(selected.parent_id || null);setCommentText('');setNotice(null);}}>← {parent ? 'Voltar ao projeto principal' : 'Todos os projetos'}</button>
+      <div className="card p-4 sm:p-6 space-y-5">
+        <div className="flex flex-col lg:flex-row lg:justify-between gap-3">
+          <div className="min-w-0"><div className="flex flex-wrap gap-2 items-center"><WorkStatus status={selected.status}/>{parent && <span className="status status-info">Subprojeto de {parent.name}</span>}{workIsOverdue(selected)&&<span className="status status-warn">Prazo vencido</span>}</div>
+            <h3 className="text-2xl font-medium mt-3 break-words">{selected.name}</h3><p className="text-sm text-slate-500 mt-1">{selected.client_name} · {selected.service_type}</p></div>
+          <div className="flex flex-wrap gap-2 self-start"><button className="mini-btn" type="button" onClick={()=>beginEdit(selected)}><Pencil size={13} className="mr-1"/>Editar</button><button className="mini-btn mini-btn-danger" type="button" disabled={saving} onClick={()=>removeProject(selected)}><Trash2 size={13} className="mr-1"/>Excluir</button></div>
+        </div>
+        <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          <InfoCard label="Início" value={dateBR(selected.start_date)}/><InfoCard label="Prazo de entrega" value={dateBR(selected.due_date)}/>
+          <InfoCard label="Orçamento" value={money(selected.budget)}/><InfoCard label="Próxima ação" value={selected.next_step || 'Não definida'}/>
+        </div>
+        <div className="space-y-2"><div className="flex justify-between text-sm"><span>Andamento {children.length ? '(média dos subprojetos)' : ''}</span><strong>{workProgress(selected, records)}%</strong></div><Progress value={workProgress(selected, records)}/></div>
+        <div><h4 className="text-sm font-medium mb-1">Descrição e informações</h4><p className="text-sm text-slate-600 whitespace-pre-wrap break-words">{selected.description || 'Nenhuma informação adicional registrada.'}</p></div>
+      </div>
+      {!selected.parent_id && <section className="card p-4 sm:p-6 space-y-4">
+        <div className="flex flex-wrap justify-between items-center gap-2"><div><h3 className="text-base font-medium">Subprojetos</h3><p className="text-xs text-slate-500">Divida a entrega em partes e acompanhe cada uma individualmente.</p></div>
+          <button className="mini-btn mini-btn-primary gap-1" type="button" onClick={()=>beginCreate(selected)}><Plus size={14}/> Adicionar subprojeto</button></div>
+        {children.length ? <div className="space-y-2">{children.map(child=><button type="button" key={child.id} className="w-full text-left p-3 rounded-xl border border-slate-200 hover:border-blue-300 hover:bg-blue-50/30" onClick={()=>{setSelectedId(child.id);setCommentText('');setNotice(null);}}>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"><div className="min-w-0"><p className="font-medium text-sm break-words">{child.name}</p><p className="text-xs text-slate-500 mt-1">{child.service_type} · Entrega: {dateBR(child.due_date)}</p></div><div className="flex items-center gap-3"><WorkStatus status={child.status}/><span className="text-sm font-medium">{child.progress}%</span><ChevronRight size={16}/></div></div>
+          <div className="mt-3"><Progress value={child.progress}/></div>
+        </button>)}</div> : <p className="text-sm text-slate-500">Ainda não existem subprojetos cadastrados.</p>}
+      </section>}
+      <div className="grid xl:grid-cols-2 gap-4">
+        <section className="card p-4 sm:p-6 space-y-4">
+          <div className="flex items-center justify-between gap-2"><h3 className="font-medium text-base flex items-center gap-2"><Camera size={18}/> Fotos do projeto</h3><span className="text-xs text-slate-400">{currentPhotos.length} arquivo(s)</span></div>
+          <label className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-950 text-white text-xs cursor-pointer ${photoBusy?'opacity-60 pointer-events-none':''}`}>
+            <UploadCloud size={16}/>{photoBusy?'Enviando...':'Anexar fotos'}
+            <input type="file" className="hidden" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={uploadPhotos} disabled={photoBusy}/>
+          </label>
+          <p className="text-[11px] text-slate-500">JPG, PNG, WebP ou GIF, até 10 MB por foto. Armazenamento privado no Supabase.</p>
+          {!currentPhotos.length ? <p className="text-sm text-slate-400">Nenhuma foto anexada.</p> : <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {currentPhotos.map(photo=><div className="rounded-xl overflow-hidden border border-slate-200" key={photo.id}>
+              {imageUrls[photo.id] ? <a href={imageUrls[photo.id]} target="_blank" rel="noopener noreferrer" title="Abrir foto"><img className="w-full h-28 object-cover bg-slate-100" src={imageUrls[photo.id]} alt={photo.file_name}/></a> : <div className="w-full h-28 bg-slate-100 flex items-center justify-center text-slate-400"><Camera size={20}/></div>}
+              <div className="p-2 flex items-center gap-1 justify-between"><span className="text-[10px] text-slate-500 truncate" title={photo.file_name}>{photo.file_name}</span><button type="button" aria-label={`Excluir foto ${photo.file_name}`} disabled={photoBusy} onClick={()=>removePhoto(photo)} className="text-rose-600 p-1 shrink-0"><Trash2 size={14}/></button></div>
+            </div>)}
+          </div>}
+        </section>
+        <section className="card p-4 sm:p-6 space-y-4">
+          <h3 className="font-medium text-base flex items-center gap-2"><MessageSquareText size={18}/> Comentários e acompanhamento</h3>
+          <form onSubmit={addComment} className="space-y-2"><textarea className="input min-h-24" placeholder="Escreva atualizações, decisões, pendências e observações..." value={commentText} onChange={e=>setCommentText(e.target.value)}/>
+            <div className="flex justify-end"><button type="submit" className="btn-primary" disabled={!commentText.trim() || commentBusy}>{commentBusy?'Registrando...':'Adicionar comentário'}</button></div></form>
+          <div className="space-y-3 max-h-[480px] overflow-auto">{!currentComments.length ? <p className="text-sm text-slate-400">Ainda não há comentários neste projeto.</p> : currentComments.map(c=><div key={c.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+            <div className="flex justify-between items-center gap-2"><p className="text-[11px] text-slate-500">{c.created_by === currentUser.id ? currentUser.name : 'Equipe LS'} · {new Date(c.created_at).toLocaleString('pt-BR')}</p>
+              <button type="button" aria-label="Excluir comentário" className="text-rose-500" onClick={()=>removeComment(c)} disabled={commentBusy}><Trash2 size={14}/></button></div>
+            <p className="text-sm text-slate-700 mt-2 whitespace-pre-wrap break-words">{c.body}</p>
+          </div>)}</div>
+        </section>
+      </div>
+    </> : null}
+  </div>;
+}
+
 
 function AdminProjects() {
   const {projects,setProjects,companies,history,setHistory,fetchSupabase,generateId}=useContext(AppContext);
